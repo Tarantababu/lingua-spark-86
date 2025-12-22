@@ -1,14 +1,24 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useLanguage } from '@/contexts/LanguageContext';
+import { useLanguage, Language } from '@/contexts/LanguageContext';
 import { useVocabulary } from '@/hooks/useVocabulary';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useLessons } from '@/hooks/useLessons';
 import { supabase } from '@/integrations/supabase/client';
 import { Lesson, WordStatus } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Settings, Volume2, Loader2 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { ArrowLeft, Settings, Volume2, Loader2, CheckCircle2, Link2 } from 'lucide-react';
 import WordPopover from '@/components/reader/WordPopover';
 import PhrasePopover from '@/components/reader/PhrasePopover';
 import ReaderSettings from '@/components/reader/ReaderSettings';
@@ -27,8 +37,8 @@ export default function Reader() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const { targetLanguage, nativeLanguage } = useLanguage();
-  const { getWordStatus, getWordData, addWord, updateWordStatus, updateWordTranslation, ignoreWord } = useVocabulary();
+  const { targetLanguage, getTranslationLanguage } = useLanguage();
+  const { getWordStatus, getWordData, addWord, updateWordStatus, updateWordTranslation, ignoreWord, markAllWordsAsKnown } = useVocabulary();
   const { translate, loading: translating } = useTranslation();
   const { getLesson, generateLessonAudio } = useLessons();
 
@@ -62,10 +72,15 @@ export default function Reader() {
   const [showSettings, setShowSettings] = useState(false);
   const [fontSize, setFontSize] = useState(18);
   const [lineHeight, setLineHeight] = useState(1.8);
+  const [showCompleteDialog, setShowCompleteDialog] = useState(false);
+  const [completingLesson, setCompletingLesson] = useState(false);
   
   // Track if shift key is held
   const shiftHeldRef = useRef(false);
   const lastClickedIndexRef = useRef<number | null>(null);
+  const [selectedWordIndices, setSelectedWordIndices] = useState<number[]>([]);
+  const [showMultiWordBadge, setShowMultiWordBadge] = useState(false);
+  const [isSelectionModeActive, setIsSelectionModeActive] = useState(false);
 
   // Start reading session when component mounts
   useEffect(() => {
@@ -193,6 +208,24 @@ export default function Reader() {
     const { token, index, cleanWord } = tokenData;
     if (!cleanWord) return;
 
+    // Handle selection mode - single click adds/removes words
+    if (isSelectionModeActive) {
+      const newIndices = selectedWordIndices.includes(index)
+        ? selectedWordIndices.filter(i => i !== index)
+        : [...selectedWordIndices, index].sort((a, b) => a - b);
+      
+      setSelectedWordIndices(newIndices);
+      setShowMultiWordBadge(newIndices.length > 0);
+      
+      // Clear any open popovers
+      setSelectedWord(null);
+      setSelectedWordData(null);
+      setSelectedPhrase(null);
+      setPhraseTranslation(null);
+      
+      return;
+    }
+
     // Handle shift+click for phrase selection
     if (shiftHeldRef.current && lastClickedIndexRef.current !== null) {
       const startIdx = lastClickedIndexRef.current;
@@ -219,8 +252,10 @@ export default function Reader() {
           y: rect.bottom + 8,
         });
         
-        // Fetch phrase translation
-        const result = await translate(phrase, targetLanguage, nativeLanguage);
+        // Fetch phrase translation - use lesson language, not target language
+        const lessonLang = (lesson?.language || targetLanguage) as Language;
+        const translationLang = getTranslationLanguage(lessonLang);
+        const result = await translate(phrase, lessonLang, translationLang);
         if (result) {
           setPhraseTranslation(result.translation);
         }
@@ -229,11 +264,12 @@ export default function Reader() {
       }
     }
     
-    // Single word click - reset phrase selection
+    // Single word click - reset phrase and multi-word selection
     setSelectionStart(null);
     setSelectionEnd(null);
     setSelectedPhrase(null);
     setPhraseTranslation(null);
+    setSelectedWordIndices([]);
     lastClickedIndexRef.current = index;
 
     const rect = (event.target as HTMLElement).getBoundingClientRect();
@@ -243,33 +279,34 @@ export default function Reader() {
     });
     setSelectedWord(cleanWord);
 
-    // Check if we already have translation data
-    const existingData = getWordData(cleanWord);
-    if (existingData?.translation) {
+    // Always fetch fresh translation based on current preferences
+    // This ensures translation preferences are always respected
+    setSelectedWordData(null);
+    const lessonLang = (lesson?.language || targetLanguage) as Language;
+    const translationLang = getTranslationLanguage(lessonLang);
+    const result = await translate(cleanWord, lessonLang, translationLang);
+    if (result) {
       setSelectedWordData({
-        translation: existingData.translation,
-        definition: existingData.definition || undefined,
+        translation: result.translation,
+        definition: result.definition || undefined,
+        examples: result.examples,
+        pronunciation: result.pronunciation || undefined,
       });
-    } else {
-      // Fetch translation
-      setSelectedWordData(null);
-      const result = await translate(cleanWord, targetLanguage, nativeLanguage);
-      if (result) {
-        setSelectedWordData({
-          translation: result.translation,
-          definition: result.definition || undefined,
-          examples: result.examples,
-          pronunciation: result.pronunciation || undefined,
-        });
 
-        // Add word to vocabulary if it doesn't exist
+      // Add word to vocabulary if it doesn't exist, or update with new translation
+      const existingData = getWordData(cleanWord);
+      if (existingData) {
+        // Update existing word with new translation
+        await updateWordTranslation(existingData.id, result.translation, result.definition || undefined);
+      } else {
+        // Add new word
         const wordData = await addWord(cleanWord, result.translation, result.definition || undefined, id);
         if (wordData && result.translation) {
           await updateWordTranslation(wordData.id, result.translation, result.definition || undefined);
         }
       }
     }
-  }, [targetLanguage, nativeLanguage, translate, getWordData, addWord, updateWordTranslation, id, buildPhraseFromSelection]);
+  }, [isSelectionModeActive, selectedWordIndices, targetLanguage, getTranslationLanguage, translate, getWordData, addWord, updateWordTranslation, id, buildPhraseFromSelection, lesson]);
 
   const handleSavePhrase = useCallback(async () => {
     if (!selectedPhrase || !user) return;
@@ -315,7 +352,68 @@ export default function Reader() {
     setPhraseTranslation(null);
     setSelectionStart(null);
     setSelectionEnd(null);
+    setSelectedWordIndices([]);
+    setShowMultiWordBadge(false);
+    setIsSelectionModeActive(false);
   }, []);
+
+  const toggleSelectionMode = useCallback(() => {
+    const newModeState = !isSelectionModeActive;
+    setIsSelectionModeActive(newModeState);
+    
+    // Clear selection when toggling off
+    if (!newModeState) {
+      setSelectedWordIndices([]);
+      setShowMultiWordBadge(false);
+    }
+  }, [isSelectionModeActive]);
+
+  const exitSelectionMode = useCallback(() => {
+    setIsSelectionModeActive(false);
+    setSelectedWordIndices([]);
+    setShowMultiWordBadge(false);
+  }, []);
+
+  const handleShowMultiWordTranslation = useCallback(async () => {
+    if (selectedWordIndices.length < 2) return;
+    
+    // Build phrase from selected indices with "..." separator
+    const selectedTokens = selectedWordIndices.map(i => tokens[i]);
+    const phrase = selectedTokens
+      .map((t, idx) => {
+        const word = t.cleanWord || t.token;
+        return idx === selectedTokens.length - 1 ? word : word + '...';
+      })
+      .join('');
+    
+    setSelectionStart(selectedWordIndices[0]);
+    setSelectionEnd(selectedWordIndices[selectedWordIndices.length - 1]);
+    setSelectedPhrase(phrase);
+    setPhraseTranslation(null);
+    setIsPhraseSaved(false);
+    setShowMultiWordBadge(false);
+    
+    // Exit selection mode after showing translation
+    setIsSelectionModeActive(false);
+    
+    // Position popover at first selected word
+    const firstWordElement = document.querySelector(`[data-index="${selectedWordIndices[0]}"]`);
+    if (firstWordElement) {
+      const rect = firstWordElement.getBoundingClientRect();
+      setPopoverPosition({
+        x: rect.left + rect.width / 2,
+        y: rect.bottom + 8,
+      });
+    }
+    
+    // Fetch phrase translation
+    const lessonLang = (lesson?.language || targetLanguage) as Language;
+    const translationLang = getTranslationLanguage(lessonLang);
+    const result = await translate(phrase, lessonLang, translationLang);
+    if (result) {
+      setPhraseTranslation(result.translation);
+    }
+  }, [selectedWordIndices, tokens, lesson, targetLanguage, getTranslationLanguage, translate]);
 
   const handleAudioClick = useCallback(async () => {
     if (!lesson || !id) return;
@@ -337,8 +435,61 @@ export default function Reader() {
     }
   }, [lesson, id, generateLessonAudio]);
 
+  const handleCompleteLesson = useCallback(async () => {
+    if (!lesson || completingLesson) return;
+
+    setCompletingLesson(true);
+    
+    try {
+      // Extract all unique words from the lesson
+      const words = lesson.content
+        .split(/\s+/)
+        .map(word => word.replace(/[.,!?;:"""''()[\]{}]/g, '').toLowerCase().trim())
+        .filter(word => word.length > 0);
+
+      const result = await markAllWordsAsKnown(words);
+      
+      if (result.success) {
+        toast.success(`Lesson completed! ${result.markedCount} words marked as known.`);
+        setShowCompleteDialog(false);
+        
+        // Mark the reading session as completed
+        if (sessionIdRef.current) {
+          const readingSeconds = readingStartTimeRef.current 
+            ? Math.round((Date.now() - readingStartTimeRef.current) / 1000)
+            : 0;
+          
+          await supabase
+            .from('reading_sessions')
+            .update({
+              reading_time_seconds: readingSeconds,
+              completed_at: new Date().toISOString(),
+            })
+            .eq('id', sessionIdRef.current);
+        }
+      } else {
+        toast.error('Failed to complete lesson. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error completing lesson:', error);
+      toast.error('An error occurred while completing the lesson.');
+    } finally {
+      setCompletingLesson(false);
+    }
+  }, [lesson, markAllWordsAsKnown, completingLesson]);
+
   const getWordClassName = (status: WordStatus | 'new' | null, index: number): string => {
-    // Check if this token is part of phrase selection
+    // Check if this token is part of multi-word selection (CTRL+click) - use green highlight
+    if (selectedWordIndices.includes(index) && !selectedPhrase) {
+      return 'word-multi-select';
+    }
+    
+    // Check if this token is part of an active phrase (after clicking "Show Translation")
+    if (selectedWordIndices.includes(index) && selectedPhrase) {
+      return 'word-phrase';
+    }
+    
+    // Check if this token is part of phrase selection (Shift+click)
     if (selectionStart !== null && selectionEnd !== null) {
       const minIdx = Math.min(selectionStart, selectionEnd);
       const maxIdx = Math.max(selectionStart, selectionEnd);
@@ -388,7 +539,9 @@ export default function Reader() {
             <h1 className="font-serif font-bold text-lg truncate max-w-[200px]">
               {lesson.title}
             </h1>
-            <p className="text-xs text-muted-foreground">Hold Shift + click to select phrases</p>
+            <p className="text-xs text-muted-foreground">
+              {isSelectionModeActive ? '🟢 Selection Mode: Click words to link' : 'Shift+click: consecutive phrases'}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Button 
@@ -403,6 +556,23 @@ export default function Reader() {
               ) : (
                 <Volume2 className="w-5 h-5" />
               )}
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={toggleSelectionMode}
+              title="Link words (separable verbs)"
+              className={isSelectionModeActive ? 'bg-success/20 text-success hover:bg-success/30' : ''}
+            >
+              <Link2 className="w-5 h-5" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setShowCompleteDialog(true)}
+              title="Complete lesson"
+            >
+              <CheckCircle2 className="w-5 h-5" />
             </Button>
             <Button variant="ghost" size="icon" onClick={() => setShowSettings(!showSettings)}>
               <Settings className="w-5 h-5" />
@@ -441,6 +611,7 @@ export default function Reader() {
             return (
               <span
                 key={index}
+                data-index={index}
                 className={`${getWordClassName(status as WordStatus | 'new' | null, index)} cursor-pointer`}
                 onClick={(e) => handleWordClick(tokenData, e)}
               >
@@ -484,6 +655,32 @@ export default function Reader() {
         />
       )}
 
+      {/* Multi-word Selection Badge */}
+      {showMultiWordBadge && selectedWordIndices.length > 0 && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-card border-2 border-success rounded-full shadow-lg px-4 py-2 flex items-center gap-3 animate-slide-up">
+          <span className="text-sm font-medium text-success">
+            {selectedWordIndices.length} word{selectedWordIndices.length !== 1 ? 's' : ''} linked
+          </span>
+          {selectedWordIndices.length >= 2 && (
+            <Button 
+              size="sm" 
+              onClick={handleShowMultiWordTranslation}
+              className="h-7 bg-success hover:bg-success/90"
+            >
+              Show Translation
+            </Button>
+          )}
+          <Button 
+            size="sm" 
+            variant="ghost" 
+            onClick={exitSelectionMode}
+            className="h-7"
+          >
+            Exit Mode
+          </Button>
+        </div>
+      )}
+
       {/* Audio Player */}
       {showAudioPlayer && lesson.audio_url && (
         <AudioPlayer
@@ -491,6 +688,36 @@ export default function Reader() {
           onClose={() => setShowAudioPlayer(false)}
         />
       )}
+
+      {/* Complete Lesson Dialog */}
+      <AlertDialog open={showCompleteDialog} onOpenChange={setShowCompleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Complete Lesson?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will mark all unmarked words in this lesson as "known" in your vocabulary. 
+              Words you've already marked (Ignored, Learning Status 1-4, or Known) will remain unchanged.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={completingLesson}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleCompleteLesson}
+              disabled={completingLesson}
+            >
+              {completingLesson ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Completing...
+                </>
+              ) : (
+                'Complete Lesson'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

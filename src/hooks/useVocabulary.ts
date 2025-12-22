@@ -204,6 +204,94 @@ export function useVocabulary() {
     return vocabulary.filter(v => v.status === -1).length;
   }, [vocabulary]);
 
+  const markAllWordsAsKnown = useCallback(async (words: string[]) => {
+    if (!user) return { success: false, markedCount: 0 };
+
+    const normalizedWords = words.map(w => w.toLowerCase().trim()).filter(w => w.length > 0);
+    const uniqueWords = [...new Set(normalizedWords)];
+
+    // Get existing vocabulary words
+    const existingWordStrings = vocabulary
+      .map(v => v.word.toLowerCase());
+
+    // Only create entries for words that don't exist in vocabulary at all
+    const wordsToCreate = uniqueWords.filter(w => !existingWordStrings.includes(w));
+
+    let markedCount = 0;
+
+    // Create new words as known (only for words not in vocabulary)
+    if (wordsToCreate.length > 0) {
+      const newWords = wordsToCreate.map(word => ({
+        user_id: user.id,
+        word,
+        language: targetLanguage,
+        status: 0,
+        is_phrase: word.includes(' '),
+        ease_factor: 2.5,
+        interval_days: 0,
+        repetitions: 0,
+        next_review_date: new Date().toISOString(),
+      }));
+
+      const { error, data } = await supabase
+        .from('vocabulary')
+        .insert(newWords)
+        .select();
+
+      if (!error && data) {
+        markedCount += data.length;
+      }
+    }
+
+    // Refresh vocabulary
+    await fetchVocabulary();
+
+    return { success: true, markedCount };
+  }, [user, targetLanguage, vocabulary, fetchVocabulary]);
+
+  const resetLanguageProgress = useCallback(async (language: string) => {
+    if (!user) return { success: false, message: 'User not authenticated' };
+
+    try {
+      // Delete all vocabulary for this language
+      const { error: vocabError } = await supabase
+        .from('vocabulary')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('language', language);
+
+      if (vocabError) {
+        console.error('Error deleting vocabulary:', vocabError);
+        return { success: false, message: 'Failed to delete vocabulary' };
+      }
+
+      // Delete all reading sessions for lessons in this language
+      const { data: lessons } = await supabase
+        .from('lessons')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('language', language);
+
+      if (lessons && lessons.length > 0) {
+        const lessonIds = lessons.map(l => l.id);
+        await supabase
+          .from('reading_sessions')
+          .delete()
+          .in('lesson_id', lessonIds);
+      }
+
+      // Refresh vocabulary if we're viewing the same language
+      if (language === targetLanguage) {
+        await fetchVocabulary();
+      }
+
+      return { success: true, message: 'Progress reset successfully' };
+    } catch (error) {
+      console.error('Error resetting progress:', error);
+      return { success: false, message: 'An unexpected error occurred' };
+    }
+  }, [user, targetLanguage, fetchVocabulary]);
+
   return {
     vocabulary,
     loading,
@@ -214,9 +302,11 @@ export function useVocabulary() {
     updateWordTranslation,
     markAsKnown,
     ignoreWord,
+    markAllWordsAsKnown,
     getKnownWordsCount,
     getLearningWordsCount,
     getIgnoredWordsCount,
+    resetLanguageProgress,
     refetch: fetchVocabulary,
   };
 }

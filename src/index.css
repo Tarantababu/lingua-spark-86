@@ -254,6 +254,35 @@
     filter: brightness(1.1);
   }
 
+  /* Multi-word selection (CTRL+click) - Green outline for selection state */
+  .word-multi-select {
+    @apply rounded-md px-1 py-0.5 cursor-pointer transition-all duration-200 font-medium;
+    background: linear-gradient(135deg, hsl(142 76% 36% / 0.2), hsl(142 76% 36% / 0.1));
+    color: hsl(var(--foreground));
+    box-shadow: 0 0 0 2px hsl(142 76% 36%), 0 2px 8px hsl(142 76% 36% / 0.3);
+    animation: pulse-green 1.5s ease-in-out infinite;
+  }
+
+  .dark .word-multi-select {
+    background: linear-gradient(135deg, hsl(142 76% 45% / 0.25), hsl(142 76% 45% / 0.15));
+    box-shadow: 0 0 0 2px hsl(142 76% 45%), 0 2px 8px hsl(142 76% 45% / 0.4);
+  }
+
+  .word-multi-select:hover {
+    @apply scale-105;
+    box-shadow: 0 0 0 2px hsl(142 76% 36%), 0 3px 12px hsl(142 76% 36% / 0.5);
+    filter: brightness(1.1);
+  }
+
+  @keyframes pulse-green {
+    0%, 100% {
+      box-shadow: 0 0 0 2px hsl(142 76% 36%), 0 2px 8px hsl(142 76% 36% / 0.3);
+    }
+    50% {
+      box-shadow: 0 0 0 2px hsl(142 76% 36%), 0 2px 12px hsl(142 76% 36% / 0.5);
+    }
+  }
+
   .word-known {
     @apply cursor-pointer transition-all duration-200 rounded-md px-0.5;
   }

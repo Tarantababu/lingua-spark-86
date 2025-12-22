@@ -46,6 +46,7 @@ export default function Stats() {
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [showGoalDialog, setShowGoalDialog] = useState(false);
   const [newGoal, setNewGoal] = useState<number>(20);
+  const [recentUpdate, setRecentUpdate] = useState(false);
   useEffect(() => {
     if (!authLoading && !user) {
       navigate('/auth');
@@ -70,28 +71,29 @@ export default function Stats() {
         setProfile(profileData as Profile);
       }
 
-      // Fetch vocabulary data for the last 30 days
-      const monthAgo = new Date();
-      monthAgo.setDate(monthAgo.getDate() - 30);
+      // Fetch vocabulary data for the last 400 days (to support streaks over 1 year)
+      const lookbackDays = 400;
+      const lookbackDate = new Date();
+      lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
 
       const { data: vocabData } = await supabase
         .from('vocabulary')
         .select('id, created_at, status, is_phrase')
         .eq('user_id', user.id)
         .eq('language', targetLanguage)
-        .gte('created_at', monthAgo.toISOString())
+        .gte('created_at', lookbackDate.toISOString())
         .order('created_at', { ascending: true });
 
       if (vocabData) {
         setVocabularyData(vocabData);
       }
 
-      // Fetch reading sessions
+      // Fetch reading sessions for the same period
       const { data: sessionsData } = await supabase
         .from('reading_sessions')
         .select('id, reading_time_seconds, listening_time_seconds, created_at')
         .eq('user_id', user.id)
-        .gte('created_at', monthAgo.toISOString())
+        .gte('created_at', lookbackDate.toISOString())
         .order('created_at', { ascending: true });
 
       if (sessionsData) {
@@ -121,6 +123,8 @@ export default function Stats() {
         (payload) => {
           console.log('Vocabulary updated:', payload);
           setLastUpdate(new Date());
+          setRecentUpdate(true);
+          setTimeout(() => setRecentUpdate(false), 2000);
           
           if (payload.eventType === 'INSERT') {
             const newItem = payload.new as VocabularyWithDate;
@@ -147,6 +151,8 @@ export default function Stats() {
         (payload) => {
           console.log('Reading session updated:', payload);
           setLastUpdate(new Date());
+          setRecentUpdate(true);
+          setTimeout(() => setRecentUpdate(false), 2000);
           
           if (payload.eventType === 'INSERT') {
             setReadingSessions(prev => [...prev, payload.new as ReadingSessionData]);
@@ -218,7 +224,10 @@ export default function Stats() {
     
     // Check today first
     const todayStr = currentDate.toISOString().split('T')[0];
-    const hasActivityToday = dailyVocabStats[todayStr]?.lingqs > 0 || timeStatsByDate[todayStr];
+    const todayTimeStats = timeStatsByDate[todayStr];
+    const hasActivityToday = 
+      (dailyVocabStats[todayStr]?.lingqs > 0) || 
+      (todayTimeStats && (todayTimeStats.reading > 0 || todayTimeStats.listening > 0));
     
     if (!hasActivityToday) {
       // Check yesterday - if no activity today, streak can still be valid from yesterday
@@ -228,7 +237,10 @@ export default function Stats() {
     // Count consecutive days with activity
     while (true) {
       const dateStr = currentDate.toISOString().split('T')[0];
-      const hasActivity = dailyVocabStats[dateStr]?.lingqs > 0 || timeStatsByDate[dateStr];
+      const timeStats = timeStatsByDate[dateStr];
+      const hasActivity = 
+        (dailyVocabStats[dateStr]?.lingqs > 0) || 
+        (timeStats && (timeStats.reading > 0 || timeStats.listening > 0));
       
       if (hasActivity) {
         streak++;
@@ -348,25 +360,29 @@ export default function Stats() {
         <div className="flex items-center justify-between mb-2">
           <div>
             <h1 className="font-serif text-2xl font-bold text-foreground">Statistics</h1>
-            <p className="text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               {currentLang?.flag} {currentLang?.name} Progress
             </p>
           </div>
           <div className="text-right">
-            <div className="flex items-center gap-2 justify-end">
-              <Target className="w-4 h-4 text-primary" />
-              <span className="text-2xl font-bold text-primary">{knownWords.toLocaleString()}</span>
+            <div className={`flex items-center gap-2 justify-end transition-all ${recentUpdate ? 'scale-110' : 'scale-100'}`}>
+              <Target className="w-5 h-5 text-primary" />
+              <span className="text-3xl font-bold text-primary">
+                <AnimatedCounter value={knownWords} />
+              </span>
             </div>
-            <p className="text-xs text-muted-foreground">Known Words</p>
+            <p className="text-sm font-medium text-muted-foreground">Known Words</p>
           </div>
         </div>
-        <div className="text-xs text-muted-foreground text-right">
-          Live • Updated {lastUpdate.toLocaleTimeString()}
+        <div className={`text-xs font-medium transition-colors ${recentUpdate ? 'text-success' : 'text-muted-foreground'}`}>
+          {recentUpdate ? '✓ Updated now' : `Live • Updated ${lastUpdate.toLocaleTimeString()}`}
         </div>
       </div>
 
-      {/* Streak Card - Hero */}
-      <StreakCard streak={displayStreak} className="animate-slide-up" />
+      {/* Streak Card - Hero with live update indicator */}
+      <div className={`transition-all duration-300 ${recentUpdate ? 'ring-2 ring-success ring-offset-2' : ''}`}>
+        <StreakCard streak={displayStreak} className="animate-slide-up" />
+      </div>
 
       {/* Today's Goal with Settings */}
       <Card className="animate-slide-up">
@@ -431,40 +447,80 @@ export default function Stats() {
         </CardContent>
       </Card>
 
-      {/* Quick Stats Grid */}
-      <div className="grid grid-cols-2 gap-4">
-        <StatsCard
-          icon={BookOpen}
-          iconColor="text-info"
-          label="Total LingQs"
-          value={totalWords}
-          delay={200}
-        />
-        <StatsCard
-          icon={Brain}
-          iconColor="text-success"
-          label="Words Mastered"
-          value={knownWords}
-          delay={250}
-        />
-        <StatsCard
-          icon={Clock}
-          iconColor="text-warning"
-          label="Reading Time"
-          value={Math.round(totalReadingTime / 60)}
-          suffix="min"
-          subValue={todayReadingTime > 0 ? `${Math.round(todayReadingTime / 60)}min today` : "This month"}
-          delay={300}
-        />
-        <StatsCard
-          icon={Zap}
-          iconColor="text-streak"
-          label="Listening Time"
-          value={Math.round(totalListeningTime / 60)}
-          suffix="min"
-          subValue={todayListeningTime > 0 ? `${Math.round(todayListeningTime / 60)}min today` : "This month"}
-          delay={350}
-        />
+      {/* Today's Progress Section */}
+      <div className="space-y-3">
+        <h2 className="font-semibold text-lg text-foreground">Today's Activity</h2>
+        <div className="grid grid-cols-2 gap-3">
+          <Card className={`transition-all ${recentUpdate ? 'ring-2 ring-success ring-offset-1' : ''}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <BookOpen className="w-4 h-4 text-info" />
+                <span className="text-sm font-medium text-muted-foreground">LingQs Today</span>
+              </div>
+              <div className="text-3xl font-bold text-info">
+                <AnimatedCounter value={todayLingQs} />
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {todayLingQs >= dailyGoal ? '🎉 Goal reached!' : `${dailyGoal - todayLingQs} more to reach goal`}
+              </p>
+            </CardContent>
+          </Card>
+          
+          <Card className={`transition-all ${recentUpdate ? 'ring-2 ring-success ring-offset-1' : ''}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Clock className="w-4 h-4 text-warning" />
+                <span className="text-sm font-medium text-muted-foreground">Time Today</span>
+              </div>
+              <div className="text-3xl font-bold text-warning">
+                <AnimatedCounter value={Math.round((todayReadingTime + todayListeningTime) / 60)} />
+                <span className="text-lg">min</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {Math.round(todayReadingTime / 60)}min read • {Math.round(todayListeningTime / 60)}min listen
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Overall Stats Grid */}
+      <div className="space-y-3">
+        <h2 className="font-semibold text-lg text-foreground">Overall Progress</h2>
+        <div className="grid grid-cols-2 gap-3">
+          <StatsCard
+            icon={BookOpen}
+            iconColor="text-info"
+            label="Total LingQs"
+            value={totalWords}
+            delay={200}
+          />
+          <StatsCard
+            icon={Brain}
+            iconColor="text-success"
+            label="Words Mastered"
+            value={knownWords}
+            delay={250}
+          />
+          <StatsCard
+            icon={Clock}
+            iconColor="text-warning"
+            label="Total Reading"
+            value={Math.round(totalReadingTime / 60)}
+            suffix="min"
+            subValue="All time"
+            delay={300}
+          />
+          <StatsCard
+            icon={Zap}
+            iconColor="text-streak"
+            label="Total Listening"
+            value={Math.round(totalListeningTime / 60)}
+            suffix="min"
+            subValue="All time"
+            delay={350}
+          />
+        </div>
       </div>
 
       {/* Weekly Activity Chart */}
