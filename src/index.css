@@ -196,7 +196,7 @@
   }
 
   .word-ignored {
-    @apply cursor-pointer transition-all hover:bg-muted/50 rounded px-0.5 opacity-50;
+    @apply cursor-pointer transition-all hover:bg-muted rounded px-0.5;
   }
 
   /* Reader text styling */
