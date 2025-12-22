@@ -1,5 +1,6 @@
-export type WordStatus = 0 | 1 | 2 | 3 | 4 | 5;
-// 0 = ignored/known
+export type WordStatus = -1 | 0 | 1 | 2 | 3 | 4 | 5;
+// -1 = ignored (no highlight, excluded from stats)
+// 0 = known (no highlight, counted as known)
 // 1 = new (blue)
 // 2 = learning level 1 (dark yellow)
 // 3 = learning level 2 (medium yellow)
