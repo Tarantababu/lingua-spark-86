@@ -214,6 +214,70 @@
   .streak-badge {
     @apply bg-streak text-streak-foreground font-bold rounded-full px-3 py-1 flex items-center gap-1;
   }
+
+  /* Streak card with glow */
+  .streak-card-active {
+    @apply relative overflow-hidden;
+    background: linear-gradient(135deg, hsl(var(--streak) / 0.15), hsl(var(--streak) / 0.05));
+  }
+
+  .streak-card-active::before {
+    content: '';
+    @apply absolute inset-0 rounded-xl;
+    background: linear-gradient(135deg, hsl(var(--streak) / 0.1), transparent);
+    animation: glow-pulse 2s ease-in-out infinite;
+  }
+
+  /* Activity heatmap cell */
+  .heatmap-cell {
+    @apply rounded transition-all duration-200 hover:ring-2 hover:ring-primary/50;
+  }
+
+  .heatmap-empty {
+    @apply bg-muted/50;
+  }
+
+  .heatmap-low {
+    background: hsl(var(--success) / 0.3);
+  }
+
+  .heatmap-medium {
+    background: hsl(var(--success) / 0.5);
+  }
+
+  .heatmap-high {
+    background: hsl(var(--success) / 0.7);
+  }
+
+  .heatmap-max {
+    @apply bg-success;
+  }
+
+  /* Circular progress */
+  .circular-progress {
+    transform: rotate(-90deg);
+  }
+
+  .circular-progress-track {
+    stroke: hsl(var(--muted));
+  }
+
+  .circular-progress-bar {
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s ease-out;
+  }
+
+  /* Shimmer effect for loading */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--muted-foreground) / 0.1) 50%,
+      hsl(var(--muted)) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
 }
 
 @layer utilities {

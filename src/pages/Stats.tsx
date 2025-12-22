@@ -5,19 +5,26 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useVocabulary } from '@/hooks/useVocabulary';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { Target, BookOpen, Clock, Flame, TrendingUp, Calendar } from 'lucide-react';
+import { Target, BookOpen, Clock, Brain, Zap } from 'lucide-react';
 import { DailyStats, Profile } from '@/types';
+
+import { StreakCard } from '@/components/stats/StreakCard';
+import { DailyGoalCard } from '@/components/stats/DailyGoalCard';
+import { WeeklyChart } from '@/components/stats/WeeklyChart';
+import { ActivityHeatmap } from '@/components/stats/ActivityHeatmap';
+import { StatsCard } from '@/components/stats/StatsCard';
+import { AnimatedCounter } from '@/components/stats/AnimatedCounter';
 
 export default function Stats() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { targetLanguage, languages } = useLanguage();
-  const { getKnownWordsCount, getLearningWordsCount, vocabulary } = useVocabulary();
+  const { getKnownWordsCount, getLearningWordsCount } = useVocabulary();
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [weeklyStats, setWeeklyStats] = useState<DailyStats[]>([]);
+  const [monthlyStats, setMonthlyStats] = useState<DailyStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -25,6 +32,7 @@ export default function Stats() {
     }
   }, [user, authLoading, navigate]);
 
+  // Fetch initial data
   useEffect(() => {
     async function fetchData() {
       if (!user) return;
@@ -42,25 +50,72 @@ export default function Stats() {
         setProfile(profileData as Profile);
       }
 
-      // Fetch weekly stats
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
+      // Fetch last 30 days of stats
+      const monthAgo = new Date();
+      monthAgo.setDate(monthAgo.getDate() - 30);
 
       const { data: statsData } = await supabase
         .from('daily_stats')
         .select('*')
         .eq('user_id', user.id)
-        .gte('date', weekAgo.toISOString().split('T')[0])
+        .gte('date', monthAgo.toISOString().split('T')[0])
         .order('date', { ascending: true });
 
       if (statsData) {
-        setWeeklyStats(statsData as DailyStats[]);
+        setMonthlyStats(statsData as DailyStats[]);
       }
 
       setLoading(false);
     }
 
     fetchData();
+  }, [user]);
+
+  // Real-time subscription for live updates
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('stats-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'daily_stats',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('Stats updated:', payload);
+          setLastUpdate(new Date());
+          
+          if (payload.eventType === 'INSERT') {
+            setMonthlyStats(prev => [...prev, payload.new as DailyStats]);
+          } else if (payload.eventType === 'UPDATE') {
+            setMonthlyStats(prev => 
+              prev.map(s => s.id === (payload.new as DailyStats).id ? payload.new as DailyStats : s)
+            );
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('Profile updated:', payload);
+          setProfile(payload.new as Profile);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const knownWords = getKnownWordsCount();
@@ -71,31 +126,44 @@ export default function Stats() {
 
   // Calculate today's progress
   const today = new Date().toISOString().split('T')[0];
-  const todayStats = weeklyStats.find(s => s.date === today);
+  const todayStats = monthlyStats.find(s => s.date === today);
   const todayLingQs = todayStats?.lingqs_created || 0;
-  const goalProgress = Math.min((todayLingQs / dailyGoal) * 100, 100);
+  const todayReadingTime = todayStats?.reading_time_seconds || 0;
+  const todayListeningTime = todayStats?.listening_time_seconds || 0;
 
   const currentLang = languages.find(l => l.code === targetLanguage);
 
-  // Generate activity calendar for last 7 days
-  const activityDays = Array.from({ length: 7 }, (_, i) => {
+  // Prepare weekly chart data (last 7 days)
+  const weeklyChartData = Array.from({ length: 7 }, (_, i) => {
     const date = new Date();
     date.setDate(date.getDate() - (6 - i));
     const dateStr = date.toISOString().split('T')[0];
-    const dayStats = weeklyStats.find(s => s.date === dateStr);
+    const dayStats = monthlyStats.find(s => s.date === dateStr);
     return {
       date: dateStr,
       day: date.toLocaleDateString('en', { weekday: 'short' }),
-      count: dayStats?.lingqs_created || 0,
+      lingqs: dayStats?.lingqs_created || 0,
+      goal: dailyGoal,
     };
   });
+
+  // Prepare heatmap data
+  const heatmapData = monthlyStats.map(s => ({
+    date: s.date,
+    count: s.lingqs_created || 0,
+    dayOfWeek: new Date(s.date).getDay(),
+  }));
+
+  // Calculate total stats
+  const totalReadingTime = monthlyStats.reduce((sum, s) => sum + (s.reading_time_seconds || 0), 0);
+  const totalListeningTime = monthlyStats.reduce((sum, s) => sum + (s.listening_time_seconds || 0), 0);
 
   if (authLoading || loading) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <div className="animate-pulse space-y-4">
+        <div className="space-y-4">
           {[1, 2, 3, 4].map(i => (
-            <div key={i} className="h-24 bg-muted rounded-xl" />
+            <div key={i} className="h-24 shimmer rounded-xl" />
           ))}
         </div>
       </div>
@@ -103,101 +171,91 @@ export default function Stats() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-6">
-      <div className="mb-6">
-        <h1 className="font-serif text-2xl font-bold text-foreground">Statistics</h1>
-        <p className="text-muted-foreground">
-          {currentLang?.flag} {currentLang?.name} Progress
-        </p>
-      </div>
-
-      {/* Main Stats Grid */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <Card className="col-span-2 bg-gradient-to-br from-primary/10 to-primary/5">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Target className="w-4 h-4" />
-              Known Words
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-4xl font-bold text-primary">{knownWords.toLocaleString()}</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              +{learningWords} learning
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <Flame className="w-5 h-5 text-streak" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{streak}</p>
-            <p className="text-sm text-muted-foreground">Day Streak</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <BookOpen className="w-5 h-5 text-info" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{totalWords}</p>
-            <p className="text-sm text-muted-foreground">Total LingQs</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Daily Goal Progress */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center justify-between">
-            <span>Today's Goal</span>
-            <span className="text-sm font-normal text-muted-foreground">
-              {todayLingQs} / {dailyGoal} LingQs
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Progress value={goalProgress} className="h-3" />
-          <p className="text-sm text-muted-foreground mt-2">
-            {goalProgress >= 100 
-              ? '🎉 Goal achieved!' 
-              : `${dailyGoal - todayLingQs} more to reach your goal`}
+    <div className="container mx-auto px-4 py-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between animate-fade-in">
+        <div>
+          <h1 className="font-serif text-2xl font-bold text-foreground">Statistics</h1>
+          <p className="text-muted-foreground">
+            {currentLang?.flag} {currentLang?.name} Progress
           </p>
-        </CardContent>
-      </Card>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Live • Updated {lastUpdate.toLocaleTimeString()}
+        </div>
+      </div>
 
-      {/* Weekly Activity */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Calendar className="w-4 h-4" />
-            This Week
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex justify-between">
-            {activityDays.map(day => (
-              <div key={day.date} className="flex flex-col items-center gap-1">
-                <div
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium ${
-                    day.count > 0
-                      ? day.count >= dailyGoal
-                        ? 'bg-success text-success-foreground'
-                        : 'bg-warning/50 text-warning-foreground'
-                      : 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  {day.count}
-                </div>
-                <span className="text-xs text-muted-foreground">{day.day}</span>
-              </div>
-            ))}
+      {/* Streak Card - Hero */}
+      <StreakCard streak={streak} className="animate-slide-up" />
+
+      {/* Known Words - Big Number */}
+      <Card className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent animate-slide-up" style={{ animationDelay: '100ms' }}>
+        <CardContent className="p-6">
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <Target className="w-5 h-5" />
+            <span className="text-sm font-medium">Known Words</span>
+          </div>
+          <div className="flex items-baseline gap-3">
+            <AnimatedCounter 
+              value={knownWords} 
+              className="text-5xl font-bold text-primary"
+              duration={2000}
+            />
+            <div className="text-muted-foreground">
+              <span className="text-success">+{learningWords}</span> learning
+            </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Today's Goal */}
+      <DailyGoalCard 
+        current={todayLingQs} 
+        goal={dailyGoal}
+        className="animate-slide-up"
+      />
+
+      {/* Quick Stats Grid */}
+      <div className="grid grid-cols-2 gap-4">
+        <StatsCard
+          icon={BookOpen}
+          iconColor="text-info"
+          label="Total LingQs"
+          value={totalWords}
+          delay={200}
+        />
+        <StatsCard
+          icon={Brain}
+          iconColor="text-success"
+          label="Words Mastered"
+          value={knownWords}
+          delay={250}
+        />
+        <StatsCard
+          icon={Clock}
+          iconColor="text-warning"
+          label="Reading Time"
+          value={Math.round(totalReadingTime / 60)}
+          suffix="min"
+          subValue="This month"
+          delay={300}
+        />
+        <StatsCard
+          icon={Zap}
+          iconColor="text-streak"
+          label="Listening Time"
+          value={Math.round(totalListeningTime / 60)}
+          suffix="min"
+          subValue="This month"
+          delay={350}
+        />
+      </div>
+
+      {/* Weekly Activity Chart */}
+      <WeeklyChart data={weeklyChartData} dailyGoal={dailyGoal} />
+
+      {/* Activity Heatmap */}
+      <ActivityHeatmap data={heatmapData} dailyGoal={dailyGoal} days={28} />
     </div>
   );
 }
