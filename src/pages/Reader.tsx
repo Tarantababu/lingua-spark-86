@@ -7,7 +7,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useLessons } from '@/hooks/useLessons';
 import { Lesson, WordStatus } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Settings, Volume2 } from 'lucide-react';
+import { ArrowLeft, Settings, Volume2, Loader2, Play, Pause } from 'lucide-react';
 import WordPopover from '@/components/reader/WordPopover';
 import PhrasePopover from '@/components/reader/PhrasePopover';
 import ReaderSettings from '@/components/reader/ReaderSettings';
@@ -28,10 +28,13 @@ export default function Reader() {
   const { targetLanguage, nativeLanguage } = useLanguage();
   const { getWordStatus, getWordData, addWord, updateWordStatus, updateWordTranslation } = useVocabulary();
   const { translate, loading: translating } = useTranslation();
-  const { getLesson } = useLessons();
+  const { getLesson, generateLessonAudio } = useLessons();
 
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
+  const [generatingAudio, setGeneratingAudio] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   
   // Single word selection
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
@@ -247,6 +250,55 @@ export default function Reader() {
     setSelectionEnd(null);
   }, []);
 
+  const handleAudioClick = useCallback(async () => {
+    if (!lesson || !id) return;
+
+    // If audio exists, toggle play/pause
+    if (lesson.audio_url) {
+      if (!audioRef.current) {
+        audioRef.current = new Audio(lesson.audio_url);
+        audioRef.current.onended = () => setIsPlaying(false);
+        audioRef.current.onerror = () => {
+          toast.error('Failed to play audio');
+          setIsPlaying(false);
+        };
+      }
+
+      if (isPlaying) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      } else {
+        audioRef.current.play();
+        setIsPlaying(true);
+      }
+      return;
+    }
+
+    // Generate new audio
+    setGeneratingAudio(true);
+    const audioUrl = await generateLessonAudio(id, lesson.content, lesson.language);
+    setGeneratingAudio(false);
+    
+    if (audioUrl) {
+      setLesson({ ...lesson, audio_url: audioUrl });
+      // Start playing the new audio
+      audioRef.current = new Audio(audioUrl);
+      audioRef.current.onended = () => setIsPlaying(false);
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  }, [lesson, id, isPlaying, generateLessonAudio]);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
   const getWordClassName = (status: WordStatus | 'new' | null, index: number): string => {
     // Check if this token is part of phrase selection
     if (selectionStart !== null && selectionEnd !== null) {
@@ -299,8 +351,20 @@ export default function Reader() {
             <p className="text-xs text-muted-foreground">Hold Shift + click to select phrases</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon">
-              <Volume2 className="w-5 h-5" />
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={handleAudioClick}
+              disabled={generatingAudio}
+              title={lesson.audio_url ? (isPlaying ? 'Pause audio' : 'Play audio') : 'Generate audio'}
+            >
+              {generatingAudio ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : lesson.audio_url ? (
+                isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />
+              ) : (
+                <Volume2 className="w-5 h-5" />
+              )}
             </Button>
             <Button variant="ghost" size="icon" onClick={() => setShowSettings(!showSettings)}>
               <Settings className="w-5 h-5" />
