@@ -5,6 +5,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useVocabulary } from '@/hooks/useVocabulary';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useLessons } from '@/hooks/useLessons';
+import { supabase } from '@/integrations/supabase/client';
 import { Lesson, WordStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Settings, Volume2, Loader2 } from 'lucide-react';
@@ -36,6 +37,11 @@ export default function Reader() {
   const [generatingAudio, setGeneratingAudio] = useState(false);
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   
+  // Reading session tracking
+  const sessionIdRef = useRef<string | null>(null);
+  const readingStartTimeRef = useRef<number | null>(null);
+  const isAudioPlayingRef = useRef(false);
+  
   // Single word selection
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [selectedWordData, setSelectedWordData] = useState<{
@@ -60,6 +66,53 @@ export default function Reader() {
   // Track if shift key is held
   const shiftHeldRef = useRef(false);
   const lastClickedIndexRef = useRef<number | null>(null);
+
+  // Start reading session when component mounts
+  useEffect(() => {
+    if (!user || !id) return;
+
+    const startSession = async () => {
+      readingStartTimeRef.current = Date.now();
+      
+      // Create a new reading session
+      const { data, error } = await supabase
+        .from('reading_sessions')
+        .insert({
+          user_id: user.id,
+          lesson_id: id,
+          reading_time_seconds: 0,
+          listening_time_seconds: 0,
+          words_read: 0,
+          lingqs_created: 0,
+        })
+        .select('id')
+        .single();
+      
+      if (data && !error) {
+        sessionIdRef.current = data.id;
+      }
+    };
+
+    startSession();
+
+    // Save session on unmount
+    return () => {
+      if (sessionIdRef.current && readingStartTimeRef.current) {
+        const readingSeconds = Math.round((Date.now() - readingStartTimeRef.current) / 1000);
+        
+        supabase
+          .from('reading_sessions')
+          .update({
+            reading_time_seconds: readingSeconds,
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', sessionIdRef.current)
+          .then(() => {
+            console.log('Reading session saved:', readingSeconds, 'seconds');
+          });
+      }
+    };
+  }, [user, id]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
