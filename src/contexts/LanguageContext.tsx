@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 
-export type Language = 'es' | 'fr' | 'de' | 'it' | 'pt';
+export type Language = 'es' | 'fr' | 'de' | 'it' | 'pt' | 'en';
 
 interface LanguageContextType {
   targetLanguage: Language;
@@ -18,6 +18,7 @@ const languages = [
   { code: 'de' as Language, name: 'German', flag: '🇩🇪' },
   { code: 'it' as Language, name: 'Italian', flag: '🇮🇹' },
   { code: 'pt' as Language, name: 'Portuguese', flag: '🇵🇹' },
+  { code: 'en' as Language, name: 'English', flag: '🇬🇧' },
 ];
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
