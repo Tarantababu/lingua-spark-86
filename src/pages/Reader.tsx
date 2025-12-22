@@ -1,334 +1,496 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, AlertCircle, CheckCircle, BookOpen, Loader2, CheckSquare } from 'lucide-react';
-import axios from 'axios';
+import { useAuth } from '@/contexts/AuthContext';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useVocabulary } from '@/hooks/useVocabulary';
+import { useTranslation } from '@/hooks/useTranslation';
+import { useLessons } from '@/hooks/useLessons';
+import { supabase } from '@/integrations/supabase/client';
+import { Lesson, WordStatus } from '@/types';
+import { Button } from '@/components/ui/button';
+import { ArrowLeft, Settings, Volume2, Loader2 } from 'lucide-react';
+import WordPopover from '@/components/reader/WordPopover';
+import PhrasePopover from '@/components/reader/PhrasePopover';
+import ReaderSettings from '@/components/reader/ReaderSettings';
+import AudioPlayer from '@/components/reader/AudioPlayer';
 import { toast } from 'sonner';
 
-interface Word {
-  id: string;
-  word: string;
-  translation: string;
-  isKnown: boolean;
-}
-
-interface Lesson {
-  id: string;
-  title: string;
-  description: string;
-  content: string;
-  words: Word[];
+interface TokenData {
+  token: string;
+  index: number;
+  isWord: boolean;
+  cleanWord?: string;
+  status?: WordStatus | 'new' | null;
 }
 
 export default function Reader() {
-  const { lessonId } = useParams<{ lessonId: string }>();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [lesson, setLesson] = useState<Lesson | null>(null);
-  const [currentWordIndex, setCurrentWordIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [isCompletingLesson, setIsCompletingLesson] = useState(false);
-  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
+  const { user, loading: authLoading } = useAuth();
+  const { targetLanguage, nativeLanguage } = useLanguage();
+  const { getWordStatus, getWordData, addWord, updateWordStatus, updateWordTranslation, ignoreWord } = useVocabulary();
+  const { translate, loading: translating } = useTranslation();
+  const { getLesson, generateLessonAudio } = useLessons();
 
+  const [lesson, setLesson] = useState<Lesson | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [generatingAudio, setGeneratingAudio] = useState(false);
+  const [showAudioPlayer, setShowAudioPlayer] = useState(false);
+  
+  // Reading session tracking
+  const sessionIdRef = useRef<string | null>(null);
+  const readingStartTimeRef = useRef<number | null>(null);
+  const isAudioPlayingRef = useRef(false);
+  
+  // Single word selection
+  const [selectedWord, setSelectedWord] = useState<string | null>(null);
+  const [selectedWordData, setSelectedWordData] = useState<{
+    translation?: string;
+    definition?: string;
+    examples?: string[];
+    pronunciation?: string;
+  } | null>(null);
+  
+  // Phrase selection
+  const [selectionStart, setSelectionStart] = useState<number | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
+  const [selectedPhrase, setSelectedPhrase] = useState<string | null>(null);
+  const [phraseTranslation, setPhraseTranslation] = useState<string | null>(null);
+  const [isPhraseSaved, setIsPhraseSaved] = useState(false);
+  
+  const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
+  const [showSettings, setShowSettings] = useState(false);
+  const [fontSize, setFontSize] = useState(18);
+  const [lineHeight, setLineHeight] = useState(1.8);
+  
+  // Track if shift key is held
+  const shiftHeldRef = useRef(false);
+  const lastClickedIndexRef = useRef<number | null>(null);
+
+  // Start reading session when component mounts
   useEffect(() => {
-    const fetchLesson = async () => {
-      try {
-        setLoading(true);
-        const response = await axios.get(`/api/lessons/${lessonId}`);
-        setLesson(response.data);
-        setError(null);
-      } catch (err) {
-        setError('Failed to load lesson. Please try again.');
-        console.error('Error fetching lesson:', err);
-        toast.error('Failed to load lesson');
-      } finally {
-        setLoading(false);
+    if (!user || !id) return;
+
+    const startSession = async () => {
+      readingStartTimeRef.current = Date.now();
+      
+      // Create a new reading session
+      const { data, error } = await supabase
+        .from('reading_sessions')
+        .insert({
+          user_id: user.id,
+          lesson_id: id,
+          reading_time_seconds: 0,
+          listening_time_seconds: 0,
+          words_read: 0,
+          lingqs_created: 0,
+        })
+        .select('id')
+        .single();
+      
+      if (data && !error) {
+        sessionIdRef.current = data.id;
       }
     };
 
-    fetchLesson();
-  }, [lessonId]);
+    startSession();
 
-  const handleMarkAsKnown = async (wordId: string) => {
-    if (!lesson) return;
-
-    try {
-      await axios.put(`/api/lessons/${lessonId}/words/${wordId}`, {
-        isKnown: true,
-      });
-
-      setLesson({
-        ...lesson,
-        words: lesson.words.map((word) =>
-          word.id === wordId ? { ...word, isKnown: true } : word
-        ),
-      });
-
-      toast.success('Word marked as known!');
-
-      // Move to next word
-      if (currentWordIndex < lesson.words.length - 1) {
-        setCurrentWordIndex(currentWordIndex + 1);
+    // Save session on unmount
+    return () => {
+      if (sessionIdRef.current && readingStartTimeRef.current) {
+        const readingSeconds = Math.round((Date.now() - readingStartTimeRef.current) / 1000);
+        
+        supabase
+          .from('reading_sessions')
+          .update({
+            reading_time_seconds: readingSeconds,
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', sessionIdRef.current)
+          .then(() => {
+            console.log('Reading session saved:', readingSeconds, 'seconds');
+          });
       }
-    } catch (err) {
-      setError('Failed to update word. Please try again.');
-      console.error('Error updating word:', err);
-      toast.error('Failed to mark word as known');
+    };
+  }, [user, id]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') shiftHeldRef.current = true;
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') shiftHeldRef.current = false;
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate('/auth');
     }
-  };
+  }, [user, authLoading, navigate]);
 
-  const handleSkipWord = () => {
-    if (lesson && currentWordIndex < lesson.words.length - 1) {
-      setCurrentWordIndex(currentWordIndex + 1);
-      toast.info('Word skipped');
+  useEffect(() => {
+    async function loadLesson() {
+      if (!id) return;
+      setLoading(true);
+      const lessonData = await getLesson(id);
+      setLesson(lessonData);
+      setLoading(false);
     }
-  };
+    loadLesson();
+  }, [id, getLesson]);
 
-  const handleCompleteLessonConfirm = async () => {
-    if (!lesson) return;
+  // Auto-show audio player if lesson has existing audio
+  useEffect(() => {
+    if (lesson?.audio_url) {
+      setShowAudioPlayer(true);
+    }
+  }, [lesson?.audio_url]);
 
-    try {
-      setIsCompletingLesson(true);
+  const tokens = useMemo((): TokenData[] => {
+    if (!lesson?.content) return [];
+    
+    // Split content into tokens while preserving punctuation and spaces
+    const rawTokens = lesson.content.split(/(\s+|(?=[.,!?;:"""''()[\]{}])|(?<=[.,!?;:"""''()[\]{}]))/);
+    
+    return rawTokens.map((token, index) => {
+      const cleanWord = token.replace(/[.,!?;:"""''()[\]{}]/g, '').toLowerCase().trim();
       
-      // Mark all remaining words as known
-      const unknownWords = lesson.words.filter((w) => !w.isKnown);
+      if (!cleanWord || /^\s*$/.test(token)) {
+        return { token, index, isWord: false };
+      }
       
-      const updatePromises = unknownWords.map((word) =>
-        axios.put(`/api/lessons/${lessonId}/words/${word.id}`, {
-          isKnown: true,
-        })
-      );
+      const status = getWordStatus(cleanWord);
+      return { 
+        token, 
+        index, 
+        isWord: true, 
+        cleanWord,
+        status: status === null ? 'new' : status,
+      };
+    });
+  }, [lesson?.content, getWordStatus]);
 
-      await Promise.all(updatePromises);
+  // Build phrase from selected token range
+  const buildPhraseFromSelection = useCallback((start: number, end: number): string => {
+    const minIdx = Math.min(start, end);
+    const maxIdx = Math.max(start, end);
+    
+    return tokens
+      .slice(minIdx, maxIdx + 1)
+      .map(t => t.token)
+      .join('')
+      .trim();
+  }, [tokens]);
 
-      // Update local state
-      setLesson({
-        ...lesson,
-        words: lesson.words.map((word) => ({ ...word, isKnown: true })),
-      });
+  const handleWordClick = useCallback(async (tokenData: TokenData, event: React.MouseEvent) => {
+    const { token, index, cleanWord } = tokenData;
+    if (!cleanWord) return;
 
-      setShowConfirmDialog(false);
+    // Handle shift+click for phrase selection
+    if (shiftHeldRef.current && lastClickedIndexRef.current !== null) {
+      const startIdx = lastClickedIndexRef.current;
+      const endIdx = index;
       
-      // Show success animation and toast
-      setShowSuccessAnimation(true);
-      toast.success(`🎉 Lesson completed! All ${lesson.words.length} words marked as known!`);
+      // Build phrase from selection
+      const phrase = buildPhraseFromSelection(startIdx, endIdx);
       
-      // Redirect after animation
-      setTimeout(() => {
-        navigate('/lessons', { 
-          state: { 
-            message: `Successfully completed "${lesson.title}"!`,
-            completedLesson: lesson.id
-          } 
+      if (phrase.split(/\s+/).length > 1) {
+        // Multi-word phrase selected
+        setSelectionStart(Math.min(startIdx, endIdx));
+        setSelectionEnd(Math.max(startIdx, endIdx));
+        setSelectedPhrase(phrase);
+        setPhraseTranslation(null);
+        setIsPhraseSaved(false);
+        
+        // Clear single word selection
+        setSelectedWord(null);
+        setSelectedWordData(null);
+        
+        const rect = (event.target as HTMLElement).getBoundingClientRect();
+        setPopoverPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.bottom + 8,
         });
-      }, 2000);
-    } catch (err) {
-      setError('Failed to complete lesson. Please try again.');
-      console.error('Error completing lesson:', err);
-      toast.error('Failed to complete lesson');
-      setShowConfirmDialog(false);
-    } finally {
-      setIsCompletingLesson(false);
+        
+        // Fetch phrase translation
+        const result = await translate(phrase, targetLanguage, nativeLanguage);
+        if (result) {
+          setPhraseTranslation(result.translation);
+        }
+        
+        return;
+      }
     }
+    
+    // Single word click - reset phrase selection
+    setSelectionStart(null);
+    setSelectionEnd(null);
+    setSelectedPhrase(null);
+    setPhraseTranslation(null);
+    lastClickedIndexRef.current = index;
+
+    const rect = (event.target as HTMLElement).getBoundingClientRect();
+    setPopoverPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.bottom + 8,
+    });
+    setSelectedWord(cleanWord);
+
+    // Check if we already have translation data
+    const existingData = getWordData(cleanWord);
+    if (existingData?.translation) {
+      setSelectedWordData({
+        translation: existingData.translation,
+        definition: existingData.definition || undefined,
+      });
+    } else {
+      // Fetch translation
+      setSelectedWordData(null);
+      const result = await translate(cleanWord, targetLanguage, nativeLanguage);
+      if (result) {
+        setSelectedWordData({
+          translation: result.translation,
+          definition: result.definition || undefined,
+          examples: result.examples,
+          pronunciation: result.pronunciation || undefined,
+        });
+
+        // Add word to vocabulary if it doesn't exist
+        const wordData = await addWord(cleanWord, result.translation, result.definition || undefined, id);
+        if (wordData && result.translation) {
+          await updateWordTranslation(wordData.id, result.translation, result.definition || undefined);
+        }
+      }
+    }
+  }, [targetLanguage, nativeLanguage, translate, getWordData, addWord, updateWordTranslation, id, buildPhraseFromSelection]);
+
+  const handleSavePhrase = useCallback(async () => {
+    if (!selectedPhrase || !user) return;
+    
+    const wordData = await addWord(
+      selectedPhrase, 
+      phraseTranslation || undefined, 
+      undefined, 
+      id
+    );
+    
+    if (wordData) {
+      setIsPhraseSaved(true);
+      toast.success('Phrase saved to vocabulary!');
+    }
+  }, [selectedPhrase, phraseTranslation, addWord, id, user]);
+
+  const handleStatusChange = useCallback(async (status: WordStatus) => {
+    if (!selectedWord) return;
+    const wordData = getWordData(selectedWord);
+    if (wordData) {
+      await updateWordStatus(wordData.id, status);
+    }
+    setSelectedWord(null);
+    setSelectedWordData(null);
+  }, [selectedWord, getWordData, updateWordStatus]);
+
+  const handleMarkKnown = useCallback(async () => {
+    await handleStatusChange(0);
+  }, [handleStatusChange]);
+
+  const handleIgnore = useCallback(async () => {
+    if (!selectedWord) return;
+    await ignoreWord(selectedWord);
+    setSelectedWord(null);
+    setSelectedWordData(null);
+  }, [selectedWord, ignoreWord]);
+
+  const closePopover = useCallback(() => {
+    setSelectedWord(null);
+    setSelectedWordData(null);
+    setSelectedPhrase(null);
+    setPhraseTranslation(null);
+    setSelectionStart(null);
+    setSelectionEnd(null);
+  }, []);
+
+  const handleAudioClick = useCallback(async () => {
+    if (!lesson || !id) return;
+
+    // If audio exists, show the player
+    if (lesson.audio_url) {
+      setShowAudioPlayer(true);
+      return;
+    }
+
+    // Generate new audio
+    setGeneratingAudio(true);
+    const audioUrl = await generateLessonAudio(id, lesson.content, lesson.language);
+    setGeneratingAudio(false);
+    
+    if (audioUrl) {
+      setLesson({ ...lesson, audio_url: audioUrl });
+      setShowAudioPlayer(true);
+    }
+  }, [lesson, id, generateLessonAudio]);
+
+  const getWordClassName = (status: WordStatus | 'new' | null, index: number): string => {
+    // Check if this token is part of phrase selection
+    if (selectionStart !== null && selectionEnd !== null) {
+      const minIdx = Math.min(selectionStart, selectionEnd);
+      const maxIdx = Math.max(selectionStart, selectionEnd);
+      if (index >= minIdx && index <= maxIdx) {
+        return 'word-phrase';
+      }
+    }
+    
+    if (status === null) return '';
+    if (status === -1) return 'word-known'; // Ignored - no highlight, same as known
+    if (status === 'new') return 'word-new';
+    if (status === 0) return 'word-known';
+    if (status === 1) return 'word-new'; // Status 1 = new (blue)
+    if (status === 2) return 'word-learning-1'; // Status 2 = learning level 1 (dark yellow)
+    if (status === 3) return 'word-learning-2'; // Status 3 = learning level 2 (medium yellow)
+    if (status === 4) return 'word-learning-3'; // Status 4 = learning level 3 (light yellow)
+    if (status === 5) return 'word-known'; // Learned - no highlight
+    return '';
   };
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="text-center animate-fade-in">
-          <BookOpen className="w-12 h-12 text-indigo-600 mx-auto mb-4 animate-bounce" />
-          <p className="text-gray-600 font-semibold">Loading lesson...</p>
-        </div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse-soft text-muted-foreground">Loading...</div>
       </div>
     );
   }
 
   if (!lesson) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="bg-white p-8 rounded-lg shadow-lg text-center animate-fade-in">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Lesson Not Found</h1>
-          <p className="text-gray-600 mb-6">The lesson you're looking for doesn't exist.</p>
-          <button
-            onClick={() => navigate('/lessons')}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-lg transition hover:shadow-lg"
-          >
-            Back to Lessons
-          </button>
-        </div>
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
+        <h1 className="font-serif text-xl font-bold mb-4">Lesson not found</h1>
+        <Button onClick={() => navigate('/')}>Back to Library</Button>
       </div>
     );
   }
 
-  const currentWord = lesson.words[currentWordIndex];
-  const knownWordsCount = lesson.words.filter((w) => w.isKnown).length;
-  const totalWords = lesson.words.length;
-  const progressPercentage = (knownWordsCount / totalWords) * 100;
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-      {/* Success Animation Overlay */}
-      {showSuccessAnimation && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-          <div className="animate-pop">
-            <CheckSquare className="w-24 h-24 text-green-500 drop-shadow-lg" />
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="sticky top-0 z-50 bg-card border-b border-border">
+        <div className="container mx-auto px-4 h-14 flex items-center justify-between">
+          <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div className="text-center">
+            <h1 className="font-serif font-bold text-lg truncate max-w-[200px]">
+              {lesson.title}
+            </h1>
+            <p className="text-xs text-muted-foreground">Hold Shift + click to select phrases</p>
           </div>
-          <style>{`
-            @keyframes pop {
-              0% {
-                transform: scale(0);
-                opacity: 1;
-              }
-              50% {
-                transform: scale(1.2);
-              }
-              100% {
-                transform: scale(1);
-                opacity: 0;
-              }
-            }
-            .animate-pop {
-              animation: pop 2s ease-out forwards;
-            }
-            @keyframes fade-in {
-              from {
-                opacity: 0;
-                transform: translateY(10px);
-              }
-              to {
-                opacity: 1;
-                transform: translateY(0);
-              }
-            }
-            .animate-fade-in {
-              animation: fade-in 0.5s ease-out;
-            }
-          `}</style>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={handleAudioClick}
+              disabled={generatingAudio}
+              title={lesson.audio_url ? 'Open audio player' : 'Generate audio'}
+            >
+              {generatingAudio ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Volume2 className="w-5 h-5" />
+              )}
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => setShowSettings(!showSettings)}>
+              <Settings className="w-5 h-5" />
+            </Button>
+          </div>
         </div>
+      </header>
+
+      {/* Settings Panel */}
+      {showSettings && (
+        <ReaderSettings
+          fontSize={fontSize}
+          setFontSize={setFontSize}
+          lineHeight={lineHeight}
+          setLineHeight={setLineHeight}
+          onClose={() => setShowSettings(false)}
+        />
       )}
 
-      <div className="max-w-2xl mx-auto animate-fade-in">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <button
-            onClick={() => navigate('/lessons')}
-            className="flex items-center text-indigo-600 hover:text-indigo-800 font-semibold transition hover:shadow-md px-4 py-2 rounded-lg hover:bg-white"
-          >
-            <ChevronLeft className="w-5 h-5 mr-2" />
-            Back
-          </button>
-          <h1 className="text-3xl font-bold text-gray-800">{lesson.title}</h1>
-          <div className="w-20"></div>
-        </div>
+      {/* Reading Area */}
+      <main className={`container mx-auto px-4 py-6 max-w-3xl ${showAudioPlayer ? 'pb-24' : ''}`}>
+        <div 
+          className="reader-text select-none"
+          style={{ fontSize: `${fontSize}px`, lineHeight: lineHeight }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closePopover();
+          }}
+        >
+          {tokens.map((tokenData) => {
+            const { token, index, isWord, status } = tokenData;
+            
+            if (!isWord) {
+              return <span key={index}>{token}</span>;
+            }
 
-        {/* Error Message */}
-        {error && (
-          <div className="mb-6 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg animate-fade-in">
-            <div className="flex items-center">
-              <AlertCircle className="w-5 h-5 mr-3" />
-              {error}
-            </div>
-          </div>
-        )}
-
-        {/* Progress Bar */}
-        <div className="mb-8 bg-white p-6 rounded-lg shadow-lg hover:shadow-xl transition animate-fade-in">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-gray-700 font-semibold">Progress</span>
-            <span className="text-gray-600">{knownWordsCount} / {totalWords}</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-            <div
-              className="bg-gradient-to-r from-indigo-500 to-blue-500 h-3 rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${progressPercentage}%` }}
-            ></div>
-          </div>
-          <p className="text-sm text-gray-500 mt-2">{Math.round(progressPercentage)}% Complete</p>
-        </div>
-
-        {/* Word Card */}
-        <div className="bg-white rounded-lg shadow-lg p-8 mb-8 hover:shadow-xl transition animate-fade-in">
-          <div className="text-center mb-8">
-            <p className="text-gray-600 text-sm mb-2 font-medium">Word {currentWordIndex + 1} of {totalWords}</p>
-            <h2 className="text-5xl font-bold text-indigo-600 mb-4 animate-bounce">{currentWord.word}</h2>
-            <p className="text-xl text-gray-700">{currentWord.translation}</p>
-          </div>
-
-          {currentWord.isKnown && (
-            <div className="flex items-center justify-center text-green-600 mb-6 animate-fade-in">
-              <CheckCircle className="w-5 h-5 mr-2" />
-              <span className="font-semibold">Already marked as known</span>
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          <div className="flex gap-4 justify-center">
-            <button
-              onClick={handleSkipWord}
-              disabled={currentWordIndex >= totalWords - 1}
-              className="flex items-center gap-2 bg-gray-500 hover:bg-gray-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg transition hover:shadow-lg hover:scale-105 active:scale-95"
-            >
-              Skip
-              <ChevronRight className="w-5 h-5" />
-            </button>
-            {!currentWord.isKnown && (
-              <button
-                onClick={() => handleMarkAsKnown(currentWord.id)}
-                className="flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg transition hover:shadow-lg hover:scale-105 active:scale-95"
+            return (
+              <span
+                key={index}
+                className={`${getWordClassName(status as WordStatus | 'new' | null, index)} cursor-pointer`}
+                onClick={(e) => handleWordClick(tokenData, e)}
               >
-                <CheckCircle className="w-5 h-5" />
-                Mark as Known
-              </button>
-            )}
-          </div>
+                {token}
+              </span>
+            );
+          })}
         </div>
+      </main>
 
-        {/* Complete Lesson Button */}
-        <div className="flex justify-center mb-6 animate-fade-in">
-          <button
-            onClick={() => setShowConfirmDialog(true)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-8 rounded-lg transition hover:shadow-lg hover:scale-105 active:scale-95"
-          >
-            Complete Lesson
-          </button>
-        </div>
+      {/* Word Popover (single word) */}
+      {selectedWord && !selectedPhrase && (
+        <WordPopover
+          word={selectedWord}
+          position={popoverPosition}
+          translation={selectedWordData?.translation}
+          definition={selectedWordData?.definition}
+          examples={selectedWordData?.examples}
+          pronunciation={selectedWordData?.pronunciation}
+          loading={translating}
+          onClose={closePopover}
+          onStatusChange={handleStatusChange}
+          onMarkKnown={handleMarkKnown}
+          onIgnore={handleIgnore}
+          currentStatus={getWordStatus(selectedWord)}
+          language={lesson?.language}
+        />
+      )}
 
-        {/* Confirmation Dialog */}
-        {showConfirmDialog && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-8 max-w-sm animate-fade-in">
-              <h2 className="text-2xl font-bold text-gray-800 mb-4">Complete Lesson?</h2>
-              <p className="text-gray-600 mb-6">
-                This will mark <strong>{lesson.words.filter(w => !w.isKnown).length}</strong> remaining unknown words as known. This action cannot be undone.
-              </p>
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setShowConfirmDialog(false)}
-                  disabled={isCompletingLesson}
-                  className="flex-1 bg-gray-300 hover:bg-gray-400 disabled:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-lg transition hover:shadow-md disabled:cursor-not-allowed"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCompleteLessonConfirm}
-                  disabled={isCompletingLesson}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold py-2 px-4 rounded-lg transition hover:shadow-lg disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {isCompletingLesson ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Completing...
-                    </>
-                  ) : (
-                    'Complete'
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Phrase Popover (multiple words) */}
+      {selectedPhrase && (
+        <PhrasePopover
+          phrase={selectedPhrase}
+          position={popoverPosition}
+          translation={phraseTranslation || undefined}
+          loading={translating}
+          onClose={closePopover}
+          onSavePhrase={handleSavePhrase}
+          isSaved={isPhraseSaved}
+          language={lesson?.language}
+        />
+      )}
+
+      {/* Audio Player */}
+      {showAudioPlayer && lesson.audio_url && (
+        <AudioPlayer
+          audioUrl={lesson.audio_url}
+          onClose={() => setShowAudioPlayer(false)}
+        />
+      )}
     </div>
   );
 }
