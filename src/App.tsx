@@ -9,6 +9,7 @@ import AppLayout from "@/components/layout/AppLayout";
 import Auth from "@/pages/Auth";
 import Library from "@/pages/Library";
 import Reader from "@/pages/Reader";
+import Import from "@/pages/Import";
 import Vocabulary from "@/pages/Vocabulary";
 import Review from "@/pages/Review";
 import Stats from "@/pages/Stats";
@@ -35,6 +36,7 @@ const App = () => (
                 <Route path="/profile" element={<Profile />} />
               </Route>
               <Route path="/reader/:id" element={<Reader />} />
+              <Route path="/import" element={<Import />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>

@@ -5,7 +5,8 @@ import { useLessons } from '@/hooks/useLessons';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { BookOpen, Clock, FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { BookOpen, Clock, FileText, Plus } from 'lucide-react';
 
 export default function Library() {
   const navigate = useNavigate();
@@ -35,13 +36,19 @@ export default function Library() {
 
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="mb-6">
-        <h1 className="font-serif text-2xl font-bold text-foreground">
-          {currentLang?.flag} {currentLang?.name} Library
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          {lessons.length > 0 ? `${lessons.length} lessons available` : 'No lessons yet'}
-        </p>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="font-serif text-2xl font-bold text-foreground">
+            {currentLang?.flag} {currentLang?.name} Library
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            {lessons.length > 0 ? `${lessons.length} lessons available` : 'No lessons yet'}
+          </p>
+        </div>
+        <Button onClick={() => navigate('/import')} className="gap-2">
+          <Plus className="w-4 h-4" />
+          Import
+        </Button>
       </div>
 
       {lessons.length === 0 ? (
@@ -49,9 +56,13 @@ export default function Library() {
           <CardContent>
             <BookOpen className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
             <h2 className="font-serif text-xl font-bold mb-2">No lessons yet</h2>
-            <p className="text-muted-foreground">
-              Sample content will be added soon. Check back later!
+            <p className="text-muted-foreground mb-4">
+              Import your own content or check back later for sample lessons!
             </p>
+            <Button onClick={() => navigate('/import')}>
+              <Plus className="w-4 h-4 mr-2" />
+              Import Content
+            </Button>
           </CardContent>
         </Card>
       ) : (
