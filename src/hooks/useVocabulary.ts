@@ -163,12 +163,45 @@ export function useVocabulary() {
     return !error;
   }, [user, targetLanguage, getWordData, updateWordStatus, fetchVocabulary]);
 
+  const ignoreWord = useCallback(async (word: string) => {
+    const wordData = getWordData(word);
+    if (wordData) {
+      return updateWordStatus(wordData.id, -1);
+    }
+    
+    // If word doesn't exist, create it as ignored
+    if (!user) return false;
+    
+    const { error } = await supabase
+      .from('vocabulary')
+      .insert({
+        user_id: user.id,
+        word: word.toLowerCase().trim(),
+        language: targetLanguage,
+        status: -1,
+        is_phrase: word.includes(' '),
+        ease_factor: 2.5,
+        interval_days: 0,
+        repetitions: 0,
+        next_review_date: new Date().toISOString(),
+      });
+
+    if (!error) {
+      await fetchVocabulary();
+    }
+    return !error;
+  }, [user, targetLanguage, getWordData, updateWordStatus, fetchVocabulary]);
+
   const getKnownWordsCount = useCallback(() => {
     return vocabulary.filter(v => v.status === 0 || v.status === 5).length;
   }, [vocabulary]);
 
   const getLearningWordsCount = useCallback(() => {
     return vocabulary.filter(v => v.status >= 1 && v.status <= 4).length;
+  }, [vocabulary]);
+
+  const getIgnoredWordsCount = useCallback(() => {
+    return vocabulary.filter(v => v.status === -1).length;
   }, [vocabulary]);
 
   return {
@@ -180,8 +213,10 @@ export function useVocabulary() {
     updateWordStatus,
     updateWordTranslation,
     markAsKnown,
+    ignoreWord,
     getKnownWordsCount,
     getLearningWordsCount,
+    getIgnoredWordsCount,
     refetch: fetchVocabulary,
   };
 }

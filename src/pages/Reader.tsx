@@ -27,7 +27,7 @@ export default function Reader() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { targetLanguage, nativeLanguage } = useLanguage();
-  const { getWordStatus, getWordData, addWord, updateWordStatus, updateWordTranslation } = useVocabulary();
+  const { getWordStatus, getWordData, addWord, updateWordStatus, updateWordTranslation, ignoreWord } = useVocabulary();
   const { translate, loading: translating } = useTranslation();
   const { getLesson, generateLessonAudio } = useLessons();
 
@@ -241,6 +241,13 @@ export default function Reader() {
     await handleStatusChange(0);
   }, [handleStatusChange]);
 
+  const handleIgnore = useCallback(async () => {
+    if (!selectedWord) return;
+    await ignoreWord(selectedWord);
+    setSelectedWord(null);
+    setSelectedWordData(null);
+  }, [selectedWord, ignoreWord]);
+
   const closePopover = useCallback(() => {
     setSelectedWord(null);
     setSelectedWordData(null);
@@ -281,6 +288,7 @@ export default function Reader() {
     }
     
     if (status === null) return '';
+    if (status === -1) return 'word-ignored'; // Ignored - no highlight
     if (status === 'new') return 'word-new';
     if (status === 0) return 'word-known';
     if (status === 1) return 'word-learning-1';
@@ -395,6 +403,7 @@ export default function Reader() {
           onClose={closePopover}
           onStatusChange={handleStatusChange}
           onMarkKnown={handleMarkKnown}
+          onIgnore={handleIgnore}
           currentStatus={getWordStatus(selectedWord)}
           language={lesson?.language}
         />

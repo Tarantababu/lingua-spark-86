@@ -2,7 +2,7 @@ import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Check, Volume2, Loader2, VolumeX } from 'lucide-react';
+import { X, Check, Volume2, Loader2, VolumeX, EyeOff } from 'lucide-react';
 import { WordStatus } from '@/types';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 
@@ -17,6 +17,7 @@ interface WordPopoverProps {
   onClose: () => void;
   onStatusChange: (status: WordStatus) => void;
   onMarkKnown: () => void;
+  onIgnore: () => void;
   currentStatus: WordStatus | null;
   language?: string;
 }
@@ -39,6 +40,7 @@ export default function WordPopover({
   onClose,
   onStatusChange,
   onMarkKnown,
+  onIgnore,
   currentStatus,
   language,
 }: WordPopoverProps) {
@@ -131,7 +133,7 @@ export default function WordPopover({
           {/* Status Controls */}
           <div className="border-t border-border pt-3 mt-3">
             <p className="text-xs text-muted-foreground mb-2">Learning Status:</p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {statusOptions.map(opt => (
                 <Button
                   key={opt.value}
@@ -152,6 +154,17 @@ export default function WordPopover({
               >
                 <Check className="w-4 h-4 mr-1" />
                 Known
+              </Button>
+            </div>
+            <div className="mt-2 flex justify-end">
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`text-muted-foreground hover:text-foreground ${currentStatus === -1 ? 'bg-muted' : ''}`}
+                onClick={onIgnore}
+              >
+                <EyeOff className="w-4 h-4 mr-1" />
+                Ignore
               </Button>
             </div>
           </div>
