@@ -2,11 +2,20 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Lesson } from '@/types';
+import { toast } from 'sonner';
 
 interface LessonFilters {
   difficulty?: string;
   contentType?: string;
   topic?: string;
+}
+
+interface UpdateLessonData {
+  title?: string;
+  description?: string;
+  difficulty_level?: string;
+  content_type?: string;
+  content?: string;
 }
 
 export function useLessons(filters?: LessonFilters) {
@@ -61,10 +70,46 @@ export function useLessons(filters?: LessonFilters) {
     return data as Lesson | null;
   }, []);
 
+  const updateLesson = useCallback(async (id: string, updates: UpdateLessonData): Promise<boolean> => {
+    const { error } = await supabase
+      .from('lessons')
+      .update(updates)
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error updating lesson:', error);
+      toast.error('Failed to update lesson');
+      return false;
+    }
+
+    toast.success('Lesson updated successfully');
+    await fetchLessons();
+    return true;
+  }, [fetchLessons]);
+
+  const deleteLesson = useCallback(async (id: string): Promise<boolean> => {
+    const { error } = await supabase
+      .from('lessons')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting lesson:', error);
+      toast.error('Failed to delete lesson');
+      return false;
+    }
+
+    toast.success('Lesson deleted successfully');
+    await fetchLessons();
+    return true;
+  }, [fetchLessons]);
+
   return {
     lessons,
     loading,
     getLesson,
+    updateLesson,
+    deleteLesson,
     refetch: fetchLessons,
   };
 }
