@@ -7,10 +7,11 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useLessons } from '@/hooks/useLessons';
 import { Lesson, WordStatus } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Settings, Volume2, Loader2, Play, Pause } from 'lucide-react';
+import { ArrowLeft, Settings, Volume2, Loader2 } from 'lucide-react';
 import WordPopover from '@/components/reader/WordPopover';
 import PhrasePopover from '@/components/reader/PhrasePopover';
 import ReaderSettings from '@/components/reader/ReaderSettings';
+import AudioPlayer from '@/components/reader/AudioPlayer';
 import { toast } from 'sonner';
 
 interface TokenData {
@@ -33,8 +34,7 @@ export default function Reader() {
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
   const [generatingAudio, setGeneratingAudio] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   
   // Single word selection
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
@@ -253,24 +253,9 @@ export default function Reader() {
   const handleAudioClick = useCallback(async () => {
     if (!lesson || !id) return;
 
-    // If audio exists, toggle play/pause
+    // If audio exists, show the player
     if (lesson.audio_url) {
-      if (!audioRef.current) {
-        audioRef.current = new Audio(lesson.audio_url);
-        audioRef.current.onended = () => setIsPlaying(false);
-        audioRef.current.onerror = () => {
-          toast.error('Failed to play audio');
-          setIsPlaying(false);
-        };
-      }
-
-      if (isPlaying) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        audioRef.current.play();
-        setIsPlaying(true);
-      }
+      setShowAudioPlayer(true);
       return;
     }
 
@@ -281,23 +266,9 @@ export default function Reader() {
     
     if (audioUrl) {
       setLesson({ ...lesson, audio_url: audioUrl });
-      // Start playing the new audio
-      audioRef.current = new Audio(audioUrl);
-      audioRef.current.onended = () => setIsPlaying(false);
-      audioRef.current.play();
-      setIsPlaying(true);
+      setShowAudioPlayer(true);
     }
-  }, [lesson, id, isPlaying, generateLessonAudio]);
-
-  // Cleanup audio on unmount
-  useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-    };
-  }, []);
+  }, [lesson, id, generateLessonAudio]);
 
   const getWordClassName = (status: WordStatus | 'new' | null, index: number): string => {
     // Check if this token is part of phrase selection
@@ -356,12 +327,10 @@ export default function Reader() {
               size="icon" 
               onClick={handleAudioClick}
               disabled={generatingAudio}
-              title={lesson.audio_url ? (isPlaying ? 'Pause audio' : 'Play audio') : 'Generate audio'}
+              title={lesson.audio_url ? 'Open audio player' : 'Generate audio'}
             >
               {generatingAudio ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
-              ) : lesson.audio_url ? (
-                isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />
               ) : (
                 <Volume2 className="w-5 h-5" />
               )}
@@ -385,7 +354,7 @@ export default function Reader() {
       )}
 
       {/* Reading Area */}
-      <main className="container mx-auto px-4 py-6 max-w-3xl">
+      <main className={`container mx-auto px-4 py-6 max-w-3xl ${showAudioPlayer ? 'pb-24' : ''}`}>
         <div 
           className="reader-text select-none"
           style={{ fontSize: `${fontSize}px`, lineHeight: lineHeight }}
@@ -442,6 +411,14 @@ export default function Reader() {
           onSavePhrase={handleSavePhrase}
           isSaved={isPhraseSaved}
           language={lesson?.language}
+        />
+      )}
+
+      {/* Audio Player */}
+      {showAudioPlayer && lesson.audio_url && (
+        <AudioPlayer
+          audioUrl={lesson.audio_url}
+          onClose={() => setShowAudioPlayer(false)}
         />
       )}
     </div>
