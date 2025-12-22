@@ -2,8 +2,9 @@ import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Check, Volume2, Loader2 } from 'lucide-react';
+import { X, Check, Volume2, Loader2, VolumeX } from 'lucide-react';
 import { WordStatus } from '@/types';
+import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 
 interface WordPopoverProps {
   word: string;
@@ -17,6 +18,7 @@ interface WordPopoverProps {
   onStatusChange: (status: WordStatus) => void;
   onMarkKnown: () => void;
   currentStatus: WordStatus | null;
+  language?: string;
 }
 
 const statusOptions = [
@@ -38,7 +40,17 @@ export default function WordPopover({
   onStatusChange,
   onMarkKnown,
   currentStatus,
+  language,
 }: WordPopoverProps) {
+  const { speak, stop, isSpeaking } = useTextToSpeech();
+
+  const handleSpeak = () => {
+    if (isSpeaking) {
+      stop();
+    } else {
+      speak(word, language);
+    }
+  };
   // Calculate position to keep popover on screen
   const popoverStyle: React.CSSProperties = {
     position: 'fixed',
@@ -61,11 +73,22 @@ export default function WordPopover({
         <CardContent className="p-4">
           {/* Header */}
           <div className="flex items-start justify-between mb-3">
-            <div>
-              <h3 className="font-serif font-bold text-lg capitalize">{word}</h3>
-              {pronunciation && (
-                <p className="text-sm text-muted-foreground">{pronunciation}</p>
-              )}
+            <div className="flex items-center gap-2">
+              <div>
+                <h3 className="font-serif font-bold text-lg capitalize">{word}</h3>
+                {pronunciation && (
+                  <p className="text-sm text-muted-foreground">{pronunciation}</p>
+                )}
+              </div>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-8 w-8 text-primary hover:text-primary/80"
+                onClick={handleSpeak}
+                title="Listen to pronunciation"
+              >
+                {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </Button>
             </div>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
               <X className="w-4 h-4" />

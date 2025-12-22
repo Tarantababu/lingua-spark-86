@@ -363,6 +363,7 @@ export default function Reader() {
           onStatusChange={handleStatusChange}
           onMarkKnown={handleMarkKnown}
           currentStatus={getWordStatus(selectedWord)}
+          language={lesson?.language}
         />
       )}
 
@@ -376,6 +377,7 @@ export default function Reader() {
           onClose={closePopover}
           onSavePhrase={handleSavePhrase}
           isSaved={isPhraseSaved}
+          language={lesson?.language}
         />
       )}
     </div>
