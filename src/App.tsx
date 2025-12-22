@@ -8,6 +8,7 @@ import { LanguageProvider } from "@/contexts/LanguageContext";
 import AppLayout from "@/components/layout/AppLayout";
 import Auth from "@/pages/Auth";
 import Library from "@/pages/Library";
+import Reader from "@/pages/Reader";
 import Vocabulary from "@/pages/Vocabulary";
 import Review from "@/pages/Review";
 import Stats from "@/pages/Stats";
@@ -33,6 +34,7 @@ const App = () => (
                 <Route path="/stats" element={<Stats />} />
                 <Route path="/profile" element={<Profile />} />
               </Route>
+              <Route path="/reader/:id" element={<Reader />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
