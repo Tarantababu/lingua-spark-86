@@ -93,6 +93,13 @@ export default function Reader() {
     loadLesson();
   }, [id, getLesson]);
 
+  // Auto-show audio player if lesson has existing audio
+  useEffect(() => {
+    if (lesson?.audio_url) {
+      setShowAudioPlayer(true);
+    }
+  }, [lesson?.audio_url]);
+
   const tokens = useMemo((): TokenData[] => {
     if (!lesson?.content) return [];
     
