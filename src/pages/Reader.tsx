@@ -295,13 +295,14 @@ export default function Reader() {
     }
     
     if (status === null) return '';
-    if (status === -1) return 'word-ignored'; // Ignored - no highlight
+    if (status === -1) return 'word-known'; // Ignored - no highlight, same as known
     if (status === 'new') return 'word-new';
     if (status === 0) return 'word-known';
-    if (status === 1) return 'word-learning-1';
-    if (status === 2) return 'word-learning-2';
-    if (status === 3) return 'word-learning-3';
-    if (status === 4) return 'word-learning-4';
+    if (status === 1) return 'word-new'; // Status 1 = new (blue)
+    if (status === 2) return 'word-learning-1'; // Status 2 = learning level 1 (dark yellow)
+    if (status === 3) return 'word-learning-2'; // Status 3 = learning level 2 (medium yellow)
+    if (status === 4) return 'word-learning-3'; // Status 4 = learning level 3 (light yellow)
+    if (status === 5) return 'word-known'; // Learned - no highlight
     return '';
   };
 
