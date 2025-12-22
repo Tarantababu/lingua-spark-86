@@ -5,8 +5,12 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useVocabulary } from '@/hooks/useVocabulary';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
-import { Target, BookOpen, Clock, Brain, Zap } from 'lucide-react';
-import { DailyStats, Profile } from '@/types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Target, BookOpen, Clock, Brain, Zap, Settings2 } from 'lucide-react';
+import { Profile } from '@/types';
+import { toast } from 'sonner';
 
 import { StreakCard } from '@/components/stats/StreakCard';
 import { DailyGoalCard } from '@/components/stats/DailyGoalCard';
@@ -40,7 +44,8 @@ export default function Stats() {
   const [readingSessions, setReadingSessions] = useState<ReadingSessionData[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-
+  const [showGoalDialog, setShowGoalDialog] = useState(false);
+  const [newGoal, setNewGoal] = useState<number>(20);
   useEffect(() => {
     if (!authLoading && !user) {
       navigate('/auth');
@@ -244,6 +249,34 @@ export default function Stats() {
   const totalWords = knownWords + learningWords;
   const dailyGoal = profile?.daily_lingq_goal || 20;
 
+  // Sync newGoal state with profile
+  useEffect(() => {
+    if (profile?.daily_lingq_goal) {
+      setNewGoal(profile.daily_lingq_goal);
+    }
+  }, [profile?.daily_lingq_goal]);
+
+  // Handle updating daily goal
+  const handleUpdateGoal = async () => {
+    if (!user || !profile) return;
+    
+    const goalValue = Math.max(1, Math.min(100, newGoal));
+    
+    const { error } = await supabase
+      .from('profiles')
+      .update({ daily_lingq_goal: goalValue })
+      .eq('user_id', user.id);
+    
+    if (error) {
+      toast.error('Failed to update goal');
+      return;
+    }
+    
+    setProfile({ ...profile, daily_lingq_goal: goalValue });
+    setShowGoalDialog(false);
+    toast.success(`Daily goal set to ${goalValue} LingQs!`);
+  };
+
   // Calculate today's progress
   const today = new Date().toISOString().split('T')[0];
   const todayLingQs = dailyVocabStats[today]?.lingqs || 0;
@@ -310,15 +343,24 @@ export default function Stats() {
 
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between animate-fade-in">
-        <div>
-          <h1 className="font-serif text-2xl font-bold text-foreground">Statistics</h1>
-          <p className="text-muted-foreground">
-            {currentLang?.flag} {currentLang?.name} Progress
-          </p>
+      {/* Header with Known Words */}
+      <div className="animate-fade-in">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h1 className="font-serif text-2xl font-bold text-foreground">Statistics</h1>
+            <p className="text-muted-foreground">
+              {currentLang?.flag} {currentLang?.name} Progress
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="flex items-center gap-2 justify-end">
+              <Target className="w-4 h-4 text-primary" />
+              <span className="text-2xl font-bold text-primary">{knownWords.toLocaleString()}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">Known Words</p>
+          </div>
         </div>
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs text-muted-foreground text-right">
           Live • Updated {lastUpdate.toLocaleTimeString()}
         </div>
       </div>
@@ -326,32 +368,68 @@ export default function Stats() {
       {/* Streak Card - Hero */}
       <StreakCard streak={displayStreak} className="animate-slide-up" />
 
-      {/* Known Words - Big Number */}
-      <Card className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent animate-slide-up" style={{ animationDelay: '100ms' }}>
-        <CardContent className="p-6">
-          <div className="flex items-center gap-2 text-muted-foreground mb-2">
-            <Target className="w-5 h-5" />
-            <span className="text-sm font-medium">Known Words</span>
-          </div>
-          <div className="flex items-baseline gap-3">
-            <AnimatedCounter 
-              value={knownWords} 
-              className="text-5xl font-bold text-primary"
-              duration={2000}
-            />
-            <div className="text-muted-foreground">
-              <span className="text-success">+{learningWords}</span> learning
+      {/* Today's Goal with Settings */}
+      <Card className="animate-slide-up">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Target className="w-4 h-4 text-primary" />
+              <span className="font-medium">Today's Goal</span>
             </div>
+            <Dialog open={showGoalDialog} onOpenChange={setShowGoalDialog}>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-8 px-2">
+                  <Settings2 className="w-4 h-4 mr-1" />
+                  Set Goal
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[320px]">
+                <DialogHeader>
+                  <DialogTitle>Set Daily Goal</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 pt-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Daily LingQs Target</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={newGoal}
+                      onChange={(e) => setNewGoal(parseInt(e.target.value) || 1)}
+                      className="text-center text-lg font-bold"
+                    />
+                    <p className="text-xs text-muted-foreground text-center">
+                      Set a goal between 1-100 LingQs per day
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {[10, 20, 30, 50].map((preset) => (
+                      <Button
+                        key={preset}
+                        variant={newGoal === preset ? "default" : "outline"}
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => setNewGoal(preset)}
+                      >
+                        {preset}
+                      </Button>
+                    ))}
+                  </div>
+                  <Button onClick={handleUpdateGoal} className="w-full">
+                    Save Goal
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
+          <DailyGoalCard 
+            current={todayLingQs} 
+            goal={dailyGoal}
+            className="border-0 shadow-none p-0"
+            hideHeader
+          />
         </CardContent>
       </Card>
-
-      {/* Today's Goal */}
-      <DailyGoalCard 
-        current={todayLingQs} 
-        goal={dailyGoal}
-        className="animate-slide-up"
-      />
 
       {/* Quick Stats Grid */}
       <div className="grid grid-cols-2 gap-4">
