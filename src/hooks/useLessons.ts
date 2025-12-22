@@ -30,6 +30,7 @@ export function useLessons(filters?: LessonFilters) {
       .from('lessons')
       .select('*')
       .eq('language', targetLanguage)
+      .eq('is_archived', false)
       .order('created_at', { ascending: false });
 
     if (filters?.difficulty) {
@@ -87,6 +88,23 @@ export function useLessons(filters?: LessonFilters) {
     return true;
   }, [fetchLessons]);
 
+  const archiveLesson = useCallback(async (id: string): Promise<boolean> => {
+    const { error } = await supabase
+      .from('lessons')
+      .update({ is_archived: true })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error archiving lesson:', error);
+      toast.error('Failed to archive lesson');
+      return false;
+    }
+
+    toast.success('Lesson archived');
+    await fetchLessons();
+    return true;
+  }, [fetchLessons]);
+
   const deleteLesson = useCallback(async (id: string): Promise<boolean> => {
     const { error } = await supabase
       .from('lessons')
@@ -109,6 +127,7 @@ export function useLessons(filters?: LessonFilters) {
     loading,
     getLesson,
     updateLesson,
+    archiveLesson,
     deleteLesson,
     refetch: fetchLessons,
   };

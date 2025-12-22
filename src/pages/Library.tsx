@@ -9,16 +9,25 @@ import { BookOpen, Plus } from 'lucide-react';
 import { Lesson } from '@/types';
 import LessonCard from '@/components/library/LessonCard';
 import LessonEditDialog from '@/components/library/LessonEditDialog';
-import LessonDeleteDialog from '@/components/library/LessonDeleteDialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function Library() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const { lessons, loading, updateLesson, deleteLesson } = useLessons();
+  const { lessons, loading, updateLesson, archiveLesson } = useLessons();
   const { targetLanguage, languages } = useLanguage();
 
   const [editingLesson, setEditingLesson] = useState<Lesson | null>(null);
-  const [deletingLesson, setDeletingLesson] = useState<Lesson | null>(null);
+  const [archivingLesson, setArchivingLesson] = useState<Lesson | null>(null);
 
   React.useEffect(() => {
     if (!authLoading && !user) {
@@ -30,8 +39,8 @@ export default function Library() {
     setEditingLesson(lesson);
   };
 
-  const handleDelete = (lesson: Lesson) => {
-    setDeletingLesson(lesson);
+  const handleArchive = (lesson: Lesson) => {
+    setArchivingLesson(lesson);
   };
 
   const handleSaveEdit = async (id: string, data: {
@@ -43,9 +52,10 @@ export default function Library() {
     return await updateLesson(id, data);
   };
 
-  const handleConfirmDelete = async () => {
-    if (!deletingLesson) return false;
-    return await deleteLesson(deletingLesson.id);
+  const handleConfirmArchive = async () => {
+    if (!archivingLesson) return;
+    await archiveLesson(archivingLesson.id);
+    setArchivingLesson(null);
   };
 
   if (authLoading || loading) {
@@ -100,7 +110,7 @@ export default function Library() {
               key={lesson.id}
               lesson={lesson}
               onEdit={handleEdit}
-              onDelete={handleDelete}
+              onArchive={handleArchive}
             />
           ))}
         </div>
@@ -114,13 +124,24 @@ export default function Library() {
         onSave={handleSaveEdit}
       />
 
-      {/* Delete Confirmation Dialog */}
-      <LessonDeleteDialog
-        lessonTitle={deletingLesson?.title || ''}
-        open={!!deletingLesson}
-        onOpenChange={(open) => !open && setDeletingLesson(null)}
-        onConfirm={handleConfirmDelete}
-      />
+      {/* Archive Confirmation Dialog */}
+      <AlertDialog open={!!archivingLesson} onOpenChange={(open) => !open && setArchivingLesson(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive Lesson</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to archive "{archivingLesson?.title}"? 
+              The lesson will be hidden from your library but your vocabulary progress will be preserved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmArchive}>
+              Archive
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
