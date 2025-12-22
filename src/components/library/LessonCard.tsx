@@ -9,16 +9,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Clock, FileText, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { Archive, Clock, FileText, MoreVertical, Pencil } from 'lucide-react';
 import { Lesson } from '@/types';
 
 interface LessonCardProps {
   lesson: Lesson;
   onEdit: (lesson: Lesson) => void;
-  onDelete: (lesson: Lesson) => void;
+  onArchive: (lesson: Lesson) => void;
 }
 
-export default function LessonCard({ lesson, onEdit, onDelete }: LessonCardProps) {
+export default function LessonCard({ lesson, onEdit, onArchive }: LessonCardProps) {
   const navigate = useNavigate();
 
   const handleCardClick = () => {
@@ -61,12 +61,12 @@ export default function LessonCard({ lesson, onEdit, onDelete }: LessonCardProps
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    onDelete(lesson);
+                    onArchive(lesson);
                   }}
-                  className="text-destructive focus:text-destructive"
+                  className="text-muted-foreground"
                 >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete
+                  <Archive className="w-4 h-4 mr-2" />
+                  Archive
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

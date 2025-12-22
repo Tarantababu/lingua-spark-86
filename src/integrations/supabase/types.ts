@@ -61,6 +61,7 @@ export type Database = {
           difficulty_level: string
           estimated_minutes: number | null
           id: string
+          is_archived: boolean
           is_premium: boolean | null
           language: string
           title: string
@@ -77,6 +78,7 @@ export type Database = {
           difficulty_level: string
           estimated_minutes?: number | null
           id?: string
+          is_archived?: boolean
           is_premium?: boolean | null
           language: string
           title: string
@@ -93,6 +95,7 @@ export type Database = {
           difficulty_level?: string
           estimated_minutes?: number | null
           id?: string
+          is_archived?: boolean
           is_premium?: boolean | null
           language?: string
           title?: string
