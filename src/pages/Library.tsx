@@ -1,24 +1,52 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLessons } from '@/hooks/useLessons';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { BookOpen, Clock, FileText, Plus } from 'lucide-react';
+import { BookOpen, Plus } from 'lucide-react';
+import { Lesson } from '@/types';
+import LessonCard from '@/components/library/LessonCard';
+import LessonEditDialog from '@/components/library/LessonEditDialog';
+import LessonDeleteDialog from '@/components/library/LessonDeleteDialog';
 
 export default function Library() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const { lessons, loading } = useLessons();
+  const { lessons, loading, updateLesson, deleteLesson } = useLessons();
   const { targetLanguage, languages } = useLanguage();
+
+  const [editingLesson, setEditingLesson] = useState<Lesson | null>(null);
+  const [deletingLesson, setDeletingLesson] = useState<Lesson | null>(null);
 
   React.useEffect(() => {
     if (!authLoading && !user) {
       navigate('/auth');
     }
   }, [user, authLoading, navigate]);
+
+  const handleEdit = (lesson: Lesson) => {
+    setEditingLesson(lesson);
+  };
+
+  const handleDelete = (lesson: Lesson) => {
+    setDeletingLesson(lesson);
+  };
+
+  const handleSaveEdit = async (id: string, data: {
+    title: string;
+    description: string;
+    difficulty_level: string;
+    content_type: string;
+  }) => {
+    return await updateLesson(id, data);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingLesson) return false;
+    return await deleteLesson(deletingLesson.id);
+  };
 
   if (authLoading || loading) {
     return (
@@ -68,39 +96,31 @@ export default function Library() {
       ) : (
         <div className="grid gap-4">
           {lessons.map(lesson => (
-            <Card
+            <LessonCard
               key={lesson.id}
-              className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => navigate(`/reader/${lesson.id}`)}
-            >
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <CardTitle className="font-serif text-lg">{lesson.title}</CardTitle>
-                    <CardDescription className="mt-1">{lesson.description}</CardDescription>
-                  </div>
-                  <Badge variant="secondary">{lesson.difficulty_level}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <FileText className="w-4 h-4" />
-                    {lesson.word_count || '—'} words
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-4 h-4" />
-                    {lesson.estimated_minutes || '—'} min
-                  </span>
-                  <Badge variant="outline" className="capitalize">
-                    {lesson.content_type.replace('_', ' ')}
-                  </Badge>
-                </div>
-              </CardContent>
-            </Card>
+              lesson={lesson}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+            />
           ))}
         </div>
       )}
+
+      {/* Edit Dialog */}
+      <LessonEditDialog
+        lesson={editingLesson}
+        open={!!editingLesson}
+        onOpenChange={(open) => !open && setEditingLesson(null)}
+        onSave={handleSaveEdit}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <LessonDeleteDialog
+        lessonTitle={deletingLesson?.title || ''}
+        open={!!deletingLesson}
+        onOpenChange={(open) => !open && setDeletingLesson(null)}
+        onConfirm={handleConfirmDelete}
+      />
     </div>
   );
 }
