@@ -89,9 +89,20 @@ export function useLessons(filters?: LessonFilters) {
   }, [fetchLessons]);
 
   const archiveLesson = useCallback(async (id: string): Promise<boolean> => {
+    // First, try to delete the audio file if it exists
+    try {
+      const audioFileName = `${id}.mp3`;
+      await supabase.storage
+        .from('lesson-audio')
+        .remove([audioFileName]);
+    } catch (audioError) {
+      console.log('No audio file to delete or error deleting:', audioError);
+    }
+
+    // Clear the audio_url and archive the lesson
     const { error } = await supabase
       .from('lessons')
-      .update({ is_archived: true })
+      .update({ is_archived: true, audio_url: null })
       .eq('id', id);
 
     if (error) {
@@ -104,6 +115,23 @@ export function useLessons(filters?: LessonFilters) {
     await fetchLessons();
     return true;
   }, [fetchLessons]);
+
+  const generateLessonAudio = useCallback(async (id: string, content: string, language: string): Promise<string | null> => {
+    toast.loading('Generating audio...', { id: 'audio-gen' });
+    
+    const { data, error } = await supabase.functions.invoke('generate-lesson-audio', {
+      body: { lessonId: id, text: content, language },
+    });
+
+    if (error || data?.error) {
+      console.error('Error generating audio:', error || data?.error);
+      toast.error(data?.error || 'Failed to generate audio', { id: 'audio-gen' });
+      return null;
+    }
+
+    toast.success('Audio generated!', { id: 'audio-gen' });
+    return data.audioUrl;
+  }, []);
 
   const deleteLesson = useCallback(async (id: string): Promise<boolean> => {
     const { error } = await supabase
@@ -129,6 +157,7 @@ export function useLessons(filters?: LessonFilters) {
     updateLesson,
     archiveLesson,
     deleteLesson,
+    generateLessonAudio,
     refetch: fetchLessons,
   };
 }
