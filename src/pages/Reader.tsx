@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -9,12 +9,16 @@ import { Lesson, WordStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Settings, Volume2 } from 'lucide-react';
 import WordPopover from '@/components/reader/WordPopover';
+import PhrasePopover from '@/components/reader/PhrasePopover';
 import ReaderSettings from '@/components/reader/ReaderSettings';
+import { toast } from 'sonner';
 
-interface WordData {
-  word: string;
-  status: WordStatus | 'new';
-  isPhrase: boolean;
+interface TokenData {
+  token: string;
+  index: number;
+  isWord: boolean;
+  cleanWord?: string;
+  status?: WordStatus | 'new' | null;
 }
 
 export default function Reader() {
@@ -28,6 +32,8 @@ export default function Reader() {
 
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Single word selection
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [selectedWordData, setSelectedWordData] = useState<{
     translation?: string;
@@ -35,10 +41,37 @@ export default function Reader() {
     examples?: string[];
     pronunciation?: string;
   } | null>(null);
+  
+  // Phrase selection
+  const [selectionStart, setSelectionStart] = useState<number | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
+  const [selectedPhrase, setSelectedPhrase] = useState<string | null>(null);
+  const [phraseTranslation, setPhraseTranslation] = useState<string | null>(null);
+  const [isPhraseSaved, setIsPhraseSaved] = useState(false);
+  
   const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
   const [showSettings, setShowSettings] = useState(false);
   const [fontSize, setFontSize] = useState(18);
   const [lineHeight, setLineHeight] = useState(1.8);
+  
+  // Track if shift key is held
+  const shiftHeldRef = useRef(false);
+  const lastClickedIndexRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') shiftHeldRef.current = true;
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') shiftHeldRef.current = false;
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -57,17 +90,17 @@ export default function Reader() {
     loadLesson();
   }, [id, getLesson]);
 
-  const words = useMemo(() => {
+  const tokens = useMemo((): TokenData[] => {
     if (!lesson?.content) return [];
     
-    // Split content into words while preserving punctuation
-    const tokens = lesson.content.split(/(\s+|(?=[.,!?;:"""''()[\]{}])|(?<=[.,!?;:"""''()[\]{}]))/);
+    // Split content into tokens while preserving punctuation and spaces
+    const rawTokens = lesson.content.split(/(\s+|(?=[.,!?;:"""''()[\]{}])|(?<=[.,!?;:"""''()[\]{}]))/);
     
-    return tokens.map((token, index) => {
+    return rawTokens.map((token, index) => {
       const cleanWord = token.replace(/[.,!?;:"""''()[\]{}]/g, '').toLowerCase().trim();
       
       if (!cleanWord || /^\s*$/.test(token)) {
-        return { token, index, isWord: false, status: null };
+        return { token, index, isWord: false };
       }
       
       const status = getWordStatus(cleanWord);
@@ -81,9 +114,64 @@ export default function Reader() {
     });
   }, [lesson?.content, getWordStatus]);
 
-  const handleWordClick = useCallback(async (word: string, event: React.MouseEvent) => {
-    const cleanWord = word.replace(/[.,!?;:"""''()[\]{}]/g, '').toLowerCase().trim();
+  // Build phrase from selected token range
+  const buildPhraseFromSelection = useCallback((start: number, end: number): string => {
+    const minIdx = Math.min(start, end);
+    const maxIdx = Math.max(start, end);
+    
+    return tokens
+      .slice(minIdx, maxIdx + 1)
+      .map(t => t.token)
+      .join('')
+      .trim();
+  }, [tokens]);
+
+  const handleWordClick = useCallback(async (tokenData: TokenData, event: React.MouseEvent) => {
+    const { token, index, cleanWord } = tokenData;
     if (!cleanWord) return;
+
+    // Handle shift+click for phrase selection
+    if (shiftHeldRef.current && lastClickedIndexRef.current !== null) {
+      const startIdx = lastClickedIndexRef.current;
+      const endIdx = index;
+      
+      // Build phrase from selection
+      const phrase = buildPhraseFromSelection(startIdx, endIdx);
+      
+      if (phrase.split(/\s+/).length > 1) {
+        // Multi-word phrase selected
+        setSelectionStart(Math.min(startIdx, endIdx));
+        setSelectionEnd(Math.max(startIdx, endIdx));
+        setSelectedPhrase(phrase);
+        setPhraseTranslation(null);
+        setIsPhraseSaved(false);
+        
+        // Clear single word selection
+        setSelectedWord(null);
+        setSelectedWordData(null);
+        
+        const rect = (event.target as HTMLElement).getBoundingClientRect();
+        setPopoverPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.bottom + 8,
+        });
+        
+        // Fetch phrase translation
+        const result = await translate(phrase, targetLanguage, nativeLanguage);
+        if (result) {
+          setPhraseTranslation(result.translation);
+        }
+        
+        return;
+      }
+    }
+    
+    // Single word click - reset phrase selection
+    setSelectionStart(null);
+    setSelectionEnd(null);
+    setSelectedPhrase(null);
+    setPhraseTranslation(null);
+    lastClickedIndexRef.current = index;
 
     const rect = (event.target as HTMLElement).getBoundingClientRect();
     setPopoverPosition({
@@ -118,7 +206,23 @@ export default function Reader() {
         }
       }
     }
-  }, [targetLanguage, nativeLanguage, translate, getWordData, addWord, updateWordTranslation, id]);
+  }, [targetLanguage, nativeLanguage, translate, getWordData, addWord, updateWordTranslation, id, buildPhraseFromSelection]);
+
+  const handleSavePhrase = useCallback(async () => {
+    if (!selectedPhrase || !user) return;
+    
+    const wordData = await addWord(
+      selectedPhrase, 
+      phraseTranslation || undefined, 
+      undefined, 
+      id
+    );
+    
+    if (wordData) {
+      setIsPhraseSaved(true);
+      toast.success('Phrase saved to vocabulary!');
+    }
+  }, [selectedPhrase, phraseTranslation, addWord, id, user]);
 
   const handleStatusChange = useCallback(async (status: WordStatus) => {
     if (!selectedWord) return;
@@ -137,9 +241,22 @@ export default function Reader() {
   const closePopover = useCallback(() => {
     setSelectedWord(null);
     setSelectedWordData(null);
+    setSelectedPhrase(null);
+    setPhraseTranslation(null);
+    setSelectionStart(null);
+    setSelectionEnd(null);
   }, []);
 
-  const getWordClassName = (status: WordStatus | 'new' | null): string => {
+  const getWordClassName = (status: WordStatus | 'new' | null, index: number): string => {
+    // Check if this token is part of phrase selection
+    if (selectionStart !== null && selectionEnd !== null) {
+      const minIdx = Math.min(selectionStart, selectionEnd);
+      const maxIdx = Math.max(selectionStart, selectionEnd);
+      if (index >= minIdx && index <= maxIdx) {
+        return 'word-phrase';
+      }
+    }
+    
     if (status === null) return '';
     if (status === 'new') return 'word-new';
     if (status === 0) return 'word-known';
@@ -175,9 +292,12 @@ export default function Reader() {
           <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <h1 className="font-serif font-bold text-lg truncate max-w-[200px]">
-            {lesson.title}
-          </h1>
+          <div className="text-center">
+            <h1 className="font-serif font-bold text-lg truncate max-w-[200px]">
+              {lesson.title}
+            </h1>
+            <p className="text-xs text-muted-foreground">Hold Shift + click to select phrases</p>
+          </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon">
               <Volume2 className="w-5 h-5" />
@@ -203,13 +323,15 @@ export default function Reader() {
       {/* Reading Area */}
       <main className="container mx-auto px-4 py-6 max-w-3xl">
         <div 
-          className="reader-text"
+          className="reader-text select-none"
           style={{ fontSize: `${fontSize}px`, lineHeight: lineHeight }}
           onClick={(e) => {
             if (e.target === e.currentTarget) closePopover();
           }}
         >
-          {words.map(({ token, index, isWord, cleanWord, status }) => {
+          {tokens.map((tokenData) => {
+            const { token, index, isWord, status } = tokenData;
+            
             if (!isWord) {
               return <span key={index}>{token}</span>;
             }
@@ -217,8 +339,8 @@ export default function Reader() {
             return (
               <span
                 key={index}
-                className={getWordClassName(status as WordStatus | 'new' | null)}
-                onClick={(e) => handleWordClick(token, e)}
+                className={`${getWordClassName(status as WordStatus | 'new' | null, index)} cursor-pointer`}
+                onClick={(e) => handleWordClick(tokenData, e)}
               >
                 {token}
               </span>
@@ -227,8 +349,8 @@ export default function Reader() {
         </div>
       </main>
 
-      {/* Word Popover */}
-      {selectedWord && (
+      {/* Word Popover (single word) */}
+      {selectedWord && !selectedPhrase && (
         <WordPopover
           word={selectedWord}
           position={popoverPosition}
@@ -241,6 +363,19 @@ export default function Reader() {
           onStatusChange={handleStatusChange}
           onMarkKnown={handleMarkKnown}
           currentStatus={getWordStatus(selectedWord)}
+        />
+      )}
+
+      {/* Phrase Popover (multiple words) */}
+      {selectedPhrase && (
+        <PhrasePopover
+          phrase={selectedPhrase}
+          position={popoverPosition}
+          translation={phraseTranslation || undefined}
+          loading={translating}
+          onClose={closePopover}
+          onSavePhrase={handleSavePhrase}
+          isSaved={isPhraseSaved}
         />
       )}
     </div>
