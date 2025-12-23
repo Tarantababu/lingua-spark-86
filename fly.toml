@@ -1,10 +1,10 @@
-# fly.toml app configuration file generated for lingua-spark-86 on 2025-12-23T23:19:48+01:00
+# fly.toml app configuration file generated for lingua-spark-86 on 2025-12-23T22:43:24Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
 app = 'lingua-spark-86'
-primary_region = 'cdg'
+primary_region = 'iad'
 
 [build]
 
@@ -18,5 +18,6 @@ primary_region = 'cdg'
 
 [[vm]]
   memory = '1gb'
+  cpu_kind = 'shared'
   cpus = 1
   memory_mb = 1024
