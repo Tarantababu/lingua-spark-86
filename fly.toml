@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for lingua-spark-86 on 2025-12-23T22:43:24Z
+# fly.toml app configuration file generated for linguaspark-pb on 2025-12-23T23:04:14Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'lingua-spark-86'
+app = 'linguaspark-pb'
 primary_region = 'iad'
 
 [build]
