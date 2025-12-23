@@ -1,10 +1,17 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { pb } from '@/lib/pocketbase';
+
+interface User {
+  id: string;
+  email: string;
+  verified: boolean;
+  created: string;
+  updated: string;
+}
 
 interface AuthContextType {
   user: User | null;
-  session: Session | null;
+  session: any | null;
   loading: boolean;
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
@@ -15,55 +22,66 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
+    // Check if user is already authenticated
+    if (pb.authStore.isValid && pb.authStore.model) {
+      setUser(pb.authStore.model as any);
+      setSession({ token: pb.authStore.token, user: pb.authStore.model });
+    }
+    setLoading(false);
 
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+    // Listen for auth changes
+    pb.authStore.onChange((token, model) => {
+      setUser(model as any);
+      setSession(token ? { token, user: model } : null);
     });
-
-    return () => subscription.unsubscribe();
   }, []);
 
   const signUp = async (email: string, password: string, displayName?: string) => {
-    const redirectUrl = `${window.location.origin}/`;
-    
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: {
-          display_name: displayName,
-        },
-      },
-    });
-    return { error };
+    try {
+      // Create user account
+      const user = await pb.collection('users').create({
+        email,
+        password,
+        passwordConfirm: password,
+        emailVisibility: true,
+      });
+
+      // Auto-login after signup
+      await pb.collection('users').authWithPassword(email, password);
+
+      // Create profile
+      await pb.collection('profiles').create({
+        user: user.id,
+        display_name: displayName || email.split('@')[0],
+        native_language: 'en',
+        target_language: 'es',
+        daily_lingq_goal: 20,
+        daily_reading_goal: 15,
+      });
+
+      return { error: null };
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      return { error: new Error(error.message || 'Failed to sign up') };
+    }
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error };
+    try {
+      await pb.collection('users').authWithPassword(email, password);
+      return { error: null };
+    } catch (error: any) {
+      console.error('Sign in error:', error);
+      return { error: new Error(error.message || 'Failed to sign in') };
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    pb.authStore.clear();
   };
 
   return (

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { pb } from '@/lib/pocketbase';
 
 export type Language = 'es' | 'fr' | 'de' | 'it' | 'pt' | 'en' | 'tr';
 
@@ -49,12 +49,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (user) {
-      supabase
-        .from('profiles')
-        .select('target_language, native_language, translation_preferences')
-        .eq('user_id', user.id)
-        .maybeSingle()
-        .then(({ data }) => {
+      pb.collection('profiles')
+        .getFirstListItem(`user="${user.id}"`)
+        .then((data) => {
           if (data) {
             if (data.target_language) setTargetLanguageState(data.target_language as Language);
             if (data.native_language) setNativeLanguageState(data.native_language);
@@ -65,6 +62,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
               console.log('No translation preferences found in database, using defaults');
             }
           }
+        })
+        .catch((error) => {
+          console.log('No profile found or error:', error);
         });
     }
   }, [user]);
@@ -72,20 +72,24 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const setTargetLanguage = async (lang: Language) => {
     setTargetLanguageState(lang);
     if (user) {
-      await supabase
-        .from('profiles')
-        .update({ target_language: lang })
-        .eq('user_id', user.id);
+      try {
+        const profile = await pb.collection('profiles').getFirstListItem(`user="${user.id}"`);
+        await pb.collection('profiles').update(profile.id, { target_language: lang });
+      } catch (error) {
+        console.error('Failed to update target language:', error);
+      }
     }
   };
 
   const setNativeLanguage = async (lang: string) => {
     setNativeLanguageState(lang);
     if (user) {
-      await supabase
-        .from('profiles')
-        .update({ native_language: lang })
-        .eq('user_id', user.id);
+      try {
+        const profile = await pb.collection('profiles').getFirstListItem(`user="${user.id}"`);
+        await pb.collection('profiles').update(profile.id, { native_language: lang });
+      } catch (error) {
+        console.error('Failed to update native language:', error);
+      }
     }
   };
 
@@ -104,15 +108,12 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     setTranslationPreferencesState(newPreferences);
     
     if (user) {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ translation_preferences: newPreferences })
-        .eq('user_id', user.id);
-      
-      if (error) {
-        console.error('Failed to save translation preferences:', error);
-      } else {
+      try {
+        const profile = await pb.collection('profiles').getFirstListItem(`user="${user.id}"`);
+        await pb.collection('profiles').update(profile.id, { translation_preferences: newPreferences });
         console.log('Translation preferences saved successfully');
+      } catch (error) {
+        console.error('Failed to save translation preferences:', error);
       }
     }
   };
