@@ -269,7 +269,7 @@ export function useVocabulary() {
       const { data: lessons } = await supabase
         .from('lessons')
         .select('id')
-        .eq('user_id', user.id)
+        .eq('created_by', user.id)
         .eq('language', language);
 
       if (lessons && lessons.length > 0) {
