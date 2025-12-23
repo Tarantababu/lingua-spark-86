@@ -1,0 +1,44 @@
+# Fly.io configuration for PocketBase deployment
+# Learn more: https://fly.io/docs/reference/configuration/
+
+app = "linguaspark-pb"
+primary_region = "fra" # Frankfurt - change to your preferred region (ams, lhr, iad, etc.)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # PocketBase settings
+  # Generate a secure 32-character encryption key and add via: fly secrets set PB_ENCRYPTION_KEY=your-key
+
+[mounts]
+  source = "pb_data"
+  destination = "/pb_data"
+  initial_size = "1gb"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 250
+    soft_limit = 200
+
+  [[http_service.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[http_service.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256

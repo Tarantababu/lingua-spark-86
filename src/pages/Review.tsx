@@ -3,14 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useSRS } from '@/hooks/useSRS';
-import { VocabularyItem } from '@/types';
+import { VocabularyItem, ReviewCard as ReviewCardType } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { BookOpen, RotateCcw, Check, X, ChevronRight } from 'lucide-react';
+import { BookOpen, RotateCcw, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
-
-type ReviewMode = 'flashcard' | 'multiple_choice';
+import ReviewCard from '@/components/review/ReviewCard';
 
 export default function Review() {
   const navigate = useNavigate();
@@ -18,7 +17,7 @@ export default function Review() {
   const { targetLanguage } = useLanguage();
   const { getDueCards, getNewCards, processReview } = useSRS();
 
-  const [cards, setCards] = useState<VocabularyItem[]>([]);
+  const [cards, setCards] = useState<ReviewCardType[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -40,10 +39,41 @@ export default function Review() {
     const dueCards = await getDueCards(user.id, targetLanguage);
     const newCards = await getNewCards(user.id, targetLanguage, 10 - dueCards.length);
     
-    const allCards = [...dueCards, ...newCards];
+    const allVocabulary = [...dueCards, ...newCards];
+    
+    // Create dual cards for each vocabulary item with status 1-4 (new/learning)
+    const reviewCards: ReviewCardType[] = [];
+    
+    allVocabulary.forEach(item => {
+      // Only create dual cards for words being learned (status 1-4)
+      if (item.status >= 1 && item.status <= 4) {
+        const example = item.examples && item.examples.length > 0 ? item.examples[0] : null;
+        
+        // Card 1: Target language → Native language
+        reviewCards.push({
+          ...item,
+          cardType: 'target_to_native',
+          example,
+        });
+        
+        // Card 2: Native language → Target language
+        reviewCards.push({
+          ...item,
+          cardType: 'native_to_target',
+          example,
+        });
+      } else {
+        // For other statuses, create a single card
+        reviewCards.push({
+          ...item,
+          cardType: 'target_to_native',
+          example: item.examples && item.examples.length > 0 ? item.examples[0] : null,
+        });
+      }
+    });
     
     // Shuffle cards
-    const shuffled = allCards.sort(() => Math.random() - 0.5);
+    const shuffled = reviewCards.sort(() => Math.random() - 0.5);
     
     setCards(shuffled);
     setCurrentIndex(0);
@@ -157,36 +187,12 @@ export default function Review() {
         <Progress value={progress} className="h-2" />
       </div>
 
-      {/* Flashcard */}
-      <Card 
-        className="min-h-[300px] flex flex-col items-center justify-center cursor-pointer transition-all hover:shadow-lg"
-        onClick={() => !showAnswer && setShowAnswer(true)}
-      >
-        <CardContent className="text-center p-8 w-full">
-          {!showAnswer ? (
-            <>
-              <p className="font-serif text-3xl font-bold mb-4 capitalize">
-                {currentCard.word}
-              </p>
-              <p className="text-muted-foreground">Tap to reveal translation</p>
-            </>
-          ) : (
-            <>
-              <p className="text-muted-foreground text-lg mb-2 capitalize">
-                {currentCard.word}
-              </p>
-              <p className="font-serif text-2xl font-bold text-primary mb-2">
-                {currentCard.translation || 'No translation'}
-              </p>
-              {currentCard.definition && (
-                <p className="text-muted-foreground text-sm">
-                  {currentCard.definition}
-                </p>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
+      {/* Review Card */}
+      <ReviewCard
+        card={currentCard}
+        showAnswer={showAnswer}
+        onCardClick={() => !showAnswer && setShowAnswer(true)}
+      />
 
       {/* Response Buttons */}
       {showAnswer && (

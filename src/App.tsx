@@ -14,6 +14,7 @@ import Vocabulary from "@/pages/Vocabulary";
 import Review from "@/pages/Review";
 import Stats from "@/pages/Stats";
 import Profile from "@/pages/Profile";
+import PocketBaseTest from "@/pages/PocketBaseTest";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -37,6 +38,7 @@ const App = () => (
               </Route>
               <Route path="/reader/:id" element={<Reader />} />
               <Route path="/import" element={<Import />} />
+              <Route path="/pocketbase-test" element={<PocketBaseTest />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>

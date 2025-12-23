@@ -7,6 +7,11 @@ export type WordStatus = -1 | 0 | 1 | 2 | 3 | 4 | 5;
 // 4 = learning level 3 (light yellow)
 // 5 = learned (no highlight, counted as known)
 
+export interface ExampleSentence {
+  target: string;
+  translation: string;
+}
+
 export interface VocabularyItem {
   id: string;
   user_id: string;
@@ -23,8 +28,15 @@ export interface VocabularyItem {
   repetitions: number;
   next_review_date: string;
   last_reviewed_at: string | null;
+  examples: ExampleSentence[];
+  audio_cache: Record<string, string>;
   created_at: string;
   updated_at: string;
+}
+
+export interface ReviewCard extends VocabularyItem {
+  cardType: 'target_to_native' | 'native_to_target';
+  example: ExampleSentence | null;
 }
 
 export interface Lesson {

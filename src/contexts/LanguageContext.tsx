@@ -59,7 +59,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
             if (data.target_language) setTargetLanguageState(data.target_language as Language);
             if (data.native_language) setNativeLanguageState(data.native_language);
             if (data.translation_preferences) {
+              console.log('Loaded translation preferences from database:', data.translation_preferences);
               setTranslationPreferencesState(data.translation_preferences as TranslationPreferences);
+            } else {
+              console.log('No translation preferences found in database, using defaults');
             }
           }
         });
@@ -92,18 +95,36 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       [targetLang]: translationLang,
     };
     
+    console.log('Setting translation preference:', {
+      targetLang,
+      translationLang,
+      newPreferences
+    });
+    
     setTranslationPreferencesState(newPreferences);
     
     if (user) {
-      await supabase
+      const { error } = await supabase
         .from('profiles')
         .update({ translation_preferences: newPreferences })
         .eq('user_id', user.id);
+      
+      if (error) {
+        console.error('Failed to save translation preferences:', error);
+      } else {
+        console.log('Translation preferences saved successfully');
+      }
     }
   };
 
   const getTranslationLanguage = (targetLang: Language): string => {
-    return translationPreferences[targetLang] || 'en';
+    const translationLang = translationPreferences[targetLang] || 'en';
+    console.log('getTranslationLanguage called:', {
+      targetLang,
+      translationLang,
+      allPreferences: translationPreferences
+    });
+    return translationLang;
   };
 
   return (

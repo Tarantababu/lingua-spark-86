@@ -39,7 +39,9 @@ serve(async (req) => {
     const nativeLangName = languageNames[nativeLanguage || 'en'] || 'English';
 
     const systemPrompt = `You are a language learning assistant. Provide translations and definitions for words/phrases.
-    
+
+CRITICAL: You MUST translate to ${nativeLangName}. The translation, definition, and all explanatory text MUST be in ${nativeLangName}.
+
 Always respond in this exact JSON format:
 {
   "translation": "the translation in ${nativeLangName}",
@@ -48,11 +50,18 @@ Always respond in this exact JSON format:
   "pronunciation": "phonetic pronunciation guide"
 }
 
+IMPORTANT: 
+- The "translation" field MUST be in ${nativeLangName}
+- The "definition" field MUST be in ${nativeLangName}
+- The "examples" should be in ${targetLangName}
+- If translating to Turkish, use proper Turkish characters (ç, ğ, ı, ö, ş, ü)
+
 Be concise but helpful. Focus on the most common meaning first.`;
 
     const userPrompt = `Translate and define this ${targetLangName} word/phrase: "${word}"`;
 
-    console.log(`Translating: ${word} from ${targetLangName} to ${nativeLangName}`);
+    console.log(`Translating: "${word}" from ${targetLangName} to ${nativeLangName}`);
+    console.log(`Target language code: ${targetLanguage}, Native language code: ${nativeLanguage}`);
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -94,6 +103,8 @@ Be concise but helpful. Focus on the most common meaning first.`;
       throw new Error('No content in AI response');
     }
 
+    console.log(`Raw AI response for "${word}":`, content);
+
     // Parse the JSON from the AI response
     let parsedContent;
     try {
@@ -113,7 +124,7 @@ Be concise but helpful. Focus on the most common meaning first.`;
       };
     }
 
-    console.log(`Translation result for "${word}":`, parsedContent);
+    console.log(`Parsed translation result for "${word}" (${targetLangName} → ${nativeLangName}):`, parsedContent);
 
     return new Response(
       JSON.stringify(parsedContent),

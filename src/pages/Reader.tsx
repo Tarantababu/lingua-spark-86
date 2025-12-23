@@ -255,6 +255,13 @@ export default function Reader() {
         // Fetch phrase translation - use lesson language, not target language
         const lessonLang = (lesson?.language || targetLanguage) as Language;
         const translationLang = getTranslationLanguage(lessonLang);
+        
+        console.log('Phrase Translation Debug:', {
+          phrase,
+          lessonLanguage: lessonLang,
+          translationLanguage: translationLang
+        });
+        
         const result = await translate(phrase, lessonLang, translationLang);
         if (result) {
           setPhraseTranslation(result.translation);
@@ -284,6 +291,16 @@ export default function Reader() {
     setSelectedWordData(null);
     const lessonLang = (lesson?.language || targetLanguage) as Language;
     const translationLang = getTranslationLanguage(lessonLang);
+    
+    // Debug logging to verify translation preferences
+    console.log('Translation Debug:', {
+      word: cleanWord,
+      lessonLanguage: lessonLang,
+      translationLanguage: translationLang,
+      lesson: lesson?.language,
+      targetLanguage: targetLanguage
+    });
+    
     const result = await translate(cleanWord, lessonLang, translationLang);
     if (result) {
       setSelectedWordData({
@@ -293,17 +310,40 @@ export default function Reader() {
         pronunciation: result.pronunciation || undefined,
       });
 
+      // Prepare examples for storage
+      const examplesForStorage = result.examples?.map(ex => ({
+        target: ex,
+        translation: '' // Will be populated later or via another translation call
+      })) || [];
+
       // Add word to vocabulary if it doesn't exist, or update with new translation
       const existingData = getWordData(cleanWord);
       if (existingData) {
-        // Update existing word with new translation
-        await updateWordTranslation(existingData.id, result.translation, result.definition || undefined);
+        // Update existing word with new translation and examples
+        await supabase
+          .from('vocabulary')
+          .update({
+            translation: result.translation,
+            definition: result.definition || null,
+            examples: examplesForStorage,
+          })
+          .eq('id', existingData.id);
       } else {
-        // Add new word
-        const wordData = await addWord(cleanWord, result.translation, result.definition || undefined, id);
-        if (wordData && result.translation) {
-          await updateWordTranslation(wordData.id, result.translation, result.definition || undefined);
-        }
+        // Add new word with examples
+        await supabase
+          .from('vocabulary')
+          .insert({
+            user_id: user?.id,
+            word: cleanWord,
+            language: lessonLang,
+            translation: result.translation,
+            definition: result.definition || null,
+            status: 1,
+            is_phrase: false,
+            source_lesson_id: id,
+            examples: examplesForStorage,
+            audio_cache: {},
+          });
       }
     }
   }, [isSelectionModeActive, selectedWordIndices, targetLanguage, getTranslationLanguage, translate, getWordData, addWord, updateWordTranslation, id, buildPhraseFromSelection, lesson]);
@@ -409,6 +449,13 @@ export default function Reader() {
     // Fetch phrase translation
     const lessonLang = (lesson?.language || targetLanguage) as Language;
     const translationLang = getTranslationLanguage(lessonLang);
+    
+    console.log('Multi-word Translation Debug:', {
+      phrase,
+      lessonLanguage: lessonLang,
+      translationLanguage: translationLang
+    });
+    
     const result = await translate(phrase, lessonLang, translationLang);
     if (result) {
       setPhraseTranslation(result.translation);

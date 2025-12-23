@@ -1,0 +1,564 @@
+{
+  "collections": [
+    {
+      "name": "profiles",
+      "type": "base",
+      "system": false,
+      "schema": [
+        {
+          "name": "user",
+          "type": "relation",
+          "required": true,
+          "options": {
+            "collectionId": "_pb_users_auth_",
+            "cascadeDelete": true,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["email"]
+          }
+        },
+        {
+          "name": "display_name",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": null,
+            "max": null,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "native_language",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": 2,
+            "max": 5,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "target_language",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": 2,
+            "max": 5,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "daily_lingq_goal",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 1,
+            "max": 100
+          }
+        },
+        {
+          "name": "daily_reading_goal",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": null,
+            "max": null
+          }
+        },
+        {
+          "name": "streak_count",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "last_activity_date",
+          "type": "date",
+          "required": false,
+          "options": {
+            "min": "",
+            "max": ""
+          }
+        },
+        {
+          "name": "is_premium",
+          "type": "bool",
+          "required": false,
+          "options": {}
+        },
+        {
+          "name": "translation_preferences",
+          "type": "json",
+          "required": false,
+          "options": {}
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_profiles_user ON profiles (user)"
+      ],
+      "listRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "viewRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "createRule": "@request.auth.id != \"\"",
+      "updateRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "deleteRule": "@request.auth.id != \"\" && user = @request.auth.id"
+    },
+    {
+      "name": "lessons",
+      "type": "base",
+      "system": false,
+      "schema": [
+        {
+          "name": "title",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 1,
+            "max": 500,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "content",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 1,
+            "max": 100000,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": null,
+            "max": 1000,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "language",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 2,
+            "max": 5,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "difficulty_level",
+          "type": "select",
+          "required": true,
+          "options": {
+            "maxSelect": 1,
+            "values": ["beginner", "intermediate", "advanced"]
+          }
+        },
+        {
+          "name": "content_type",
+          "type": "select",
+          "required": true,
+          "options": {
+            "maxSelect": 1,
+            "values": ["article", "story", "dialogue", "news", "podcast", "other"]
+          }
+        },
+        {
+          "name": "topic",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": null,
+            "max": 100,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "audio_file",
+          "type": "file",
+          "required": false,
+          "options": {
+            "maxSelect": 1,
+            "maxSize": 52428800,
+            "mimeTypes": ["audio/mpeg", "audio/mp3"],
+            "thumbs": []
+          }
+        },
+        {
+          "name": "word_count",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": null,
+            "max": null
+          }
+        },
+        {
+          "name": "estimated_minutes",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": null,
+            "max": null
+          }
+        },
+        {
+          "name": "is_archived",
+          "type": "bool",
+          "required": false,
+          "options": {}
+        },
+        {
+          "name": "is_premium",
+          "type": "bool",
+          "required": false,
+          "options": {}
+        },
+        {
+          "name": "created_by",
+          "type": "relation",
+          "required": false,
+          "options": {
+            "collectionId": "_pb_users_auth_",
+            "cascadeDelete": false,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["email"]
+          }
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_lessons_language ON lessons (language)",
+        "CREATE INDEX idx_lessons_archived ON lessons (is_archived)"
+      ],
+      "listRule": "@request.auth.id != \"\"",
+      "viewRule": "@request.auth.id != \"\"",
+      "createRule": "@request.auth.id != \"\"",
+      "updateRule": "@request.auth.id != \"\" && (created_by = @request.auth.id || created_by = \"\")",
+      "deleteRule": "@request.auth.id != \"\" && (created_by = @request.auth.id || created_by = \"\")"
+    },
+    {
+      "name": "vocabulary",
+      "type": "base",
+      "system": false,
+      "schema": [
+        {
+          "name": "user",
+          "type": "relation",
+          "required": true,
+          "options": {
+            "collectionId": "_pb_users_auth_",
+            "cascadeDelete": true,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["email"]
+          }
+        },
+        {
+          "name": "word",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 1,
+            "max": 200,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "language",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 2,
+            "max": 5,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "translation",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": null,
+            "max": 500,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "definition",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": null,
+            "max": 1000,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": null,
+            "max": 2000,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "status",
+          "type": "number",
+          "required": true,
+          "options": {
+            "min": -1,
+            "max": 5
+          }
+        },
+        {
+          "name": "is_phrase",
+          "type": "bool",
+          "required": false,
+          "options": {}
+        },
+        {
+          "name": "ease_factor",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 1.3,
+            "max": 2.5
+          }
+        },
+        {
+          "name": "interval_days",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "repetitions",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "next_review_date",
+          "type": "date",
+          "required": false,
+          "options": {
+            "min": "",
+            "max": ""
+          }
+        },
+        {
+          "name": "last_reviewed_at",
+          "type": "date",
+          "required": false,
+          "options": {
+            "min": "",
+            "max": ""
+          }
+        },
+        {
+          "name": "source_lesson",
+          "type": "relation",
+          "required": false,
+          "options": {
+            "collectionId": "lessons",
+            "cascadeDelete": false,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["title"]
+          }
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_vocabulary_user_language ON vocabulary (user, language)",
+        "CREATE INDEX idx_vocabulary_word ON vocabulary (word)",
+        "CREATE INDEX idx_vocabulary_status ON vocabulary (status)"
+      ],
+      "listRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "viewRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "createRule": "@request.auth.id != \"\"",
+      "updateRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "deleteRule": "@request.auth.id != \"\" && user = @request.auth.id"
+    },
+    {
+      "name": "reading_sessions",
+      "type": "base",
+      "system": false,
+      "schema": [
+        {
+          "name": "user",
+          "type": "relation",
+          "required": true,
+          "options": {
+            "collectionId": "_pb_users_auth_",
+            "cascadeDelete": true,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["email"]
+          }
+        },
+        {
+          "name": "lesson",
+          "type": "relation",
+          "required": true,
+          "options": {
+            "collectionId": "lessons",
+            "cascadeDelete": true,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["title"]
+          }
+        },
+        {
+          "name": "words_read",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "reading_time_seconds",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "listening_time_seconds",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "lingqs_created",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "completed_at",
+          "type": "date",
+          "required": false,
+          "options": {
+            "min": "",
+            "max": ""
+          }
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_sessions_user ON reading_sessions (user)",
+        "CREATE INDEX idx_sessions_created ON reading_sessions (created)"
+      ],
+      "listRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "viewRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "createRule": "@request.auth.id != \"\"",
+      "updateRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "deleteRule": "@request.auth.id != \"\" && user = @request.auth.id"
+    },
+    {
+      "name": "daily_stats",
+      "type": "base",
+      "system": false,
+      "schema": [
+        {
+          "name": "user",
+          "type": "relation",
+          "required": true,
+          "options": {
+            "collectionId": "_pb_users_auth_",
+            "cascadeDelete": true,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["email"]
+          }
+        },
+        {
+          "name": "date",
+          "type": "date",
+          "required": true,
+          "options": {
+            "min": "",
+            "max": ""
+          }
+        },
+        {
+          "name": "words_learned",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "lingqs_created",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "known_words_count",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "reading_time_seconds",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        },
+        {
+          "name": "listening_time_seconds",
+          "type": "number",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": null
+          }
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_daily_stats_user_date ON daily_stats (user, date)",
+        "CREATE INDEX idx_daily_stats_date ON daily_stats (date)"
+      ],
+      "listRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "viewRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "createRule": "@request.auth.id != \"\"",
+      "updateRule": "@request.auth.id != \"\" && user = @request.auth.id",
+      "deleteRule": "@request.auth.id != \"\" && user = @request.auth.id"
+    }
+  ]
+}
