@@ -51,16 +51,13 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     if (user) {
       supabase
         .from('profiles')
-        .select('target_language, native_language, translation_preferences')
+        .select('target_language, native_language')
         .eq('user_id', user.id)
         .maybeSingle()
         .then(({ data }) => {
           if (data) {
             if (data.target_language) setTargetLanguageState(data.target_language as Language);
             if (data.native_language) setNativeLanguageState(data.native_language);
-            if (data.translation_preferences) {
-              setTranslationPreferencesState(data.translation_preferences as TranslationPreferences);
-            }
           }
         });
     }
@@ -93,13 +90,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     };
     
     setTranslationPreferencesState(newPreferences);
-    
-    if (user) {
-      await supabase
-        .from('profiles')
-        .update({ translation_preferences: newPreferences })
-        .eq('user_id', user.id);
-    }
+    // Translation preferences are stored in memory only for now
   };
 
   const getTranslationLanguage = (targetLang: Language): string => {
