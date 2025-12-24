@@ -116,7 +116,6 @@ export type Database = {
           native_language: string | null
           streak_count: number | null
           target_language: string | null
-          translation_preferences: Json | null
           updated_at: string
           user_id: string
         }
@@ -131,7 +130,6 @@ export type Database = {
           native_language?: string | null
           streak_count?: number | null
           target_language?: string | null
-          translation_preferences?: Json | null
           updated_at?: string
           user_id: string
         }
@@ -146,7 +144,6 @@ export type Database = {
           native_language?: string | null
           streak_count?: number | null
           target_language?: string | null
-          translation_preferences?: Json | null
           updated_at?: string
           user_id?: string
         }
