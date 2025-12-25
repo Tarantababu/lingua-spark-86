@@ -286,6 +286,43 @@ export default function Reader() {
     toast.success('Word ignored');
   }, [selectedWord, lesson, ignoreWord, refetch]);
 
+  const handleMarkKnown = useCallback(async () => {
+    if (!selectedWord || !lesson || !user) return;
+
+    const word = selectedWord.toLowerCase().trim();
+    const language = lesson.language as Language;
+
+    setLocalStatusOverrides(prev => ({ ...prev, [word]: 0 }));
+
+    try {
+      const existing = getWordData(word);
+      if (existing?.id) {
+        await updateWordStatus(existing.id, 0);
+      } else {
+        await addWord(word, language, selectedWordData?.translation, selectedWordData?.definition, id);
+        const created = getWordData(word);
+        if (created?.id) {
+          await updateWordStatus(created.id, 0);
+        }
+      }
+
+      await refetch();
+
+      setLocalStatusOverrides(prev => {
+        const copy = { ...prev };
+        delete copy[word];
+        return copy;
+      });
+
+      toast.success('Marked as known');
+    } catch {
+      toast.error('Failed to mark as known');
+    } finally {
+      setSelectedWord(null);
+      setSelectedWordData(null);
+    }
+  }, [selectedWord, lesson, user, getWordData, updateWordStatus, addWord, selectedWordData, id, refetch]);
+
   const getWordClassName = (status: WordStatus | 'new' | null) => {
     if (status === 'new') return 'word-new';
     if (status === -1 || status === 0 || status === 5) return 'word-known';
@@ -344,6 +381,7 @@ export default function Reader() {
           loading={translating}
           onClose={() => setSelectedWord(null)}
           onStatusChange={handleStatusChange}
+          onMarkKnown={handleMarkKnown}
           onIgnore={handleIgnore}
           currentStatus={getWordStatus(selectedWord)}
           language={lesson.language}
