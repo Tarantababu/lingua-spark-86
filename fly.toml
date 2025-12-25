@@ -3,8 +3,8 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'lingua-spark-86'
-primary_region = 'iad'
+app = 'linguaspark-ui'
+primary_region = 'cdg'
 
 [build]
 

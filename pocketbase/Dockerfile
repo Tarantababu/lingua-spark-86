@@ -30,6 +30,17 @@ RUN apk add --no-cache \
 # Copy PocketBase binary from downloader stage
 COPY --from=downloader /pocketbase /usr/local/bin/pocketbase
 
+# Copy hooks directory
+COPY pb_hooks /pb_hooks
+
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Copy frontend build (if exists)
+# This directory is created by the deploy-unified.sh script
+COPY pb_public /pb_public
+
 # Expose port 8080
 EXPOSE 8080
 
@@ -43,5 +54,5 @@ WORKDIR /
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
 
-# Run PocketBase
-CMD ["/usr/local/bin/pocketbase", "serve", "--http=0.0.0.0:8080", "--dir=/pb_data"]
+# Run entrypoint script
+CMD ["/entrypoint.sh"]

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useVocabulary } from '@/hooks/useVocabulary';
-import { supabase } from '@/integrations/supabase/client';
+import { pb, Profile as PBProfile } from '@/lib/pocketbase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,7 +21,7 @@ import { AnimatedCounter } from '@/components/stats/AnimatedCounter';
 
 interface VocabularyWithDate {
   id: string;
-  created_at: string;
+  created: string;
   status: number;
   is_phrase: boolean;
 }
@@ -30,7 +30,7 @@ interface ReadingSessionData {
   id: string;
   reading_time_seconds: number | null;
   listening_time_seconds: number | null;
-  created_at: string;
+  created: string;
 }
 
 export default function Stats() {
@@ -60,44 +60,57 @@ export default function Stats() {
 
       setLoading(true);
 
-      // Fetch profile
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
+      try {
+        // Fetch profile
+        const profileRecords = await pb.collection('profiles').getFullList({
+          filter: `user="${user.id}"`,
+        });
 
-      if (profileData) {
-        setProfile(profileData as Profile);
-      }
+        if (profileRecords.length > 0) {
+          const pbProfile = profileRecords[0] as any;
+          setProfile({
+            id: pbProfile.id,
+            user_id: pbProfile.user,
+            display_name: pbProfile.display_name,
+            native_language: pbProfile.native_language,
+            target_language: pbProfile.target_language,
+            daily_lingq_goal: pbProfile.daily_lingq_goal,
+            daily_reading_goal: pbProfile.daily_reading_goal,
+            streak_count: pbProfile.streak_count,
+            last_activity_date: pbProfile.last_activity_date,
+            is_premium: pbProfile.is_premium,
+            created_at: pbProfile.created,
+            updated_at: pbProfile.updated,
+          } as Profile);
+        }
 
-      // Fetch vocabulary data for the last 400 days (to support streaks over 1 year)
-      const lookbackDays = 400;
-      const lookbackDate = new Date();
-      lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
+        // Fetch vocabulary data for the last 400 days (to support streaks over 1 year)
+        const lookbackDays = 400;
+        const lookbackDate = new Date();
+        lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
 
-      const { data: vocabData } = await supabase
-        .from('vocabulary')
-        .select('id, created_at, status, is_phrase')
-        .eq('user_id', user.id)
-        .eq('language', targetLanguage)
-        .gte('created_at', lookbackDate.toISOString())
-        .order('created_at', { ascending: true });
+        const vocabData = await pb.collection('vocabulary').getFullList({
+          filter: `user="${user.id}" && language="${targetLanguage}" && created>="${lookbackDate.toISOString()}"`,
+          sort: 'created',
+          fields: 'id,created,status,is_phrase',
+        });
 
-      if (vocabData) {
-        setVocabularyData(vocabData);
-      }
+        if (vocabData) {
+          setVocabularyData(vocabData as any);
+        }
 
-      // Fetch reading sessions for the same period
-      const { data: sessionsData } = await supabase
-        .from('reading_sessions')
-        .select('id, reading_time_seconds, listening_time_seconds, created_at')
-        .eq('user_id', user.id)
-        .gte('created_at', lookbackDate.toISOString())
-        .order('created_at', { ascending: true });
+        // Fetch reading sessions for the same period
+        const sessionsData = await pb.collection('reading_sessions').getFullList({
+          filter: `user="${user.id}" && created>="${lookbackDate.toISOString()}"`,
+          sort: 'created',
+          fields: 'id,reading_time_seconds,listening_time_seconds,created',
+        });
 
-      if (sessionsData) {
-        setReadingSessions(sessionsData);
+        if (sessionsData) {
+          setReadingSessions(sessionsData as any);
+        }
+      } catch (error) {
+        console.error('Error fetching stats data:', error);
       }
 
       setLoading(false);
@@ -106,80 +119,73 @@ export default function Stats() {
     fetchData();
   }, [user, targetLanguage]);
 
-  // Real-time subscription for live updates
+  // Real-time subscription for live updates using PocketBase
   useEffect(() => {
     if (!user) return;
 
-    const channel = supabase
-      .channel('stats-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'vocabulary',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          console.log('Vocabulary updated:', payload);
-          setLastUpdate(new Date());
-          setRecentUpdate(true);
-          setTimeout(() => setRecentUpdate(false), 2000);
-          
-          if (payload.eventType === 'INSERT') {
-            const newItem = payload.new as VocabularyWithDate;
-            setVocabularyData(prev => [...prev, newItem]);
-          } else if (payload.eventType === 'UPDATE') {
-            setVocabularyData(prev => 
-              prev.map(v => v.id === (payload.new as VocabularyWithDate).id ? payload.new as VocabularyWithDate : v)
-            );
-          } else if (payload.eventType === 'DELETE') {
-            setVocabularyData(prev => 
-              prev.filter(v => v.id !== (payload.old as VocabularyWithDate).id)
-            );
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'reading_sessions',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          console.log('Reading session updated:', payload);
-          setLastUpdate(new Date());
-          setRecentUpdate(true);
-          setTimeout(() => setRecentUpdate(false), 2000);
-          
-          if (payload.eventType === 'INSERT') {
-            setReadingSessions(prev => [...prev, payload.new as ReadingSessionData]);
-          } else if (payload.eventType === 'UPDATE') {
-            setReadingSessions(prev => 
-              prev.map(s => s.id === (payload.new as ReadingSessionData).id ? payload.new as ReadingSessionData : s)
-            );
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          console.log('Profile updated:', payload);
-          setProfile(payload.new as Profile);
-        }
-      )
-      .subscribe();
+    // Subscribe to vocabulary changes
+    pb.collection('vocabulary').subscribe('*', (e) => {
+      console.log('Vocabulary updated:', e.action);
+      setLastUpdate(new Date());
+      setRecentUpdate(true);
+      setTimeout(() => setRecentUpdate(false), 2000);
+      
+      if (e.action === 'create') {
+        setVocabularyData(prev => [...prev, e.record as any]);
+      } else if (e.action === 'update') {
+        setVocabularyData(prev => 
+          prev.map(v => v.id === e.record.id ? e.record as any : v)
+        );
+      } else if (e.action === 'delete') {
+        setVocabularyData(prev => 
+          prev.filter(v => v.id !== e.record.id)
+        );
+      }
+    });
+
+    // Subscribe to reading sessions changes
+    pb.collection('reading_sessions').subscribe('*', (e) => {
+      console.log('Reading session updated:', e.action);
+      setLastUpdate(new Date());
+      setRecentUpdate(true);
+      setTimeout(() => setRecentUpdate(false), 2000);
+      
+      if (e.action === 'create') {
+        setReadingSessions(prev => [...prev, e.record as any]);
+      } else if (e.action === 'update') {
+        setReadingSessions(prev => 
+          prev.map(s => s.id === e.record.id ? e.record as any : s)
+        );
+      }
+    });
+
+    // Subscribe to profile changes
+    pb.collection('profiles').subscribe('*', (e) => {
+      console.log('Profile updated:', e.action);
+      if (e.action === 'update' && e.record.user === user.id) {
+        const pbProfile = e.record as any;
+        setProfile({
+          id: pbProfile.id,
+          user_id: pbProfile.user,
+          display_name: pbProfile.display_name,
+          native_language: pbProfile.native_language,
+          target_language: pbProfile.target_language,
+          daily_lingq_goal: pbProfile.daily_lingq_goal,
+          daily_reading_goal: pbProfile.daily_reading_goal,
+          streak_count: pbProfile.streak_count,
+          last_activity_date: pbProfile.last_activity_date,
+          is_premium: pbProfile.is_premium,
+          created_at: pbProfile.created,
+          updated_at: pbProfile.updated,
+        } as Profile);
+      }
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      // Unsubscribe from all collections
+      pb.collection('vocabulary').unsubscribe('*');
+      pb.collection('reading_sessions').unsubscribe('*');
+      pb.collection('profiles').unsubscribe('*');
     };
   }, [user]);
 
@@ -188,7 +194,7 @@ export default function Stats() {
     const statsByDate: Record<string, { lingqs: number; date: string }> = {};
     
     vocabularyData.forEach(item => {
-      const date = item.created_at.split('T')[0];
+      const date = item.created.split('T')[0];
       if (!statsByDate[date]) {
         statsByDate[date] = { lingqs: 0, date };
       }
@@ -203,7 +209,7 @@ export default function Stats() {
     const statsByDate: Record<string, { reading: number; listening: number }> = {};
     
     readingSessions.forEach(session => {
-      const date = session.created_at.split('T')[0];
+      const date = session.created.split('T')[0];
       if (!statsByDate[date]) {
         statsByDate[date] = { reading: 0, listening: 0 };
       }
@@ -274,19 +280,25 @@ export default function Stats() {
     
     const goalValue = Math.max(1, Math.min(100, newGoal));
     
-    const { error } = await supabase
-      .from('profiles')
-      .update({ daily_lingq_goal: goalValue })
-      .eq('user_id', user.id);
-    
-    if (error) {
+    try {
+      // Find the profile record
+      const profileRecords = await pb.collection('profiles').getFullList({
+        filter: `user="${user.id}"`,
+      });
+
+      if (profileRecords.length > 0) {
+        await pb.collection('profiles').update(profileRecords[0].id, { 
+          daily_lingq_goal: goalValue 
+        });
+        
+        setProfile({ ...profile, daily_lingq_goal: goalValue });
+        setShowGoalDialog(false);
+        toast.success(`Daily goal set to ${goalValue} LingQs!`);
+      }
+    } catch (error) {
+      console.error('Error updating goal:', error);
       toast.error('Failed to update goal');
-      return;
     }
-    
-    setProfile({ ...profile, daily_lingq_goal: goalValue });
-    setShowGoalDialog(false);
-    toast.success(`Daily goal set to ${goalValue} LingQs!`);
   };
 
   // Calculate today's progress

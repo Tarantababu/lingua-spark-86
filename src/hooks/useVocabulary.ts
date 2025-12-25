@@ -1,14 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { pb } from '@/lib/pocketbase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { VocabularyItem, WordStatus } from '@/types';
 
-export function useVocabulary() {
+export function useVocabulary(languageOverride?: string) {
   const { user } = useAuth();
   const { targetLanguage } = useLanguage();
   const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [updateCounter, setUpdateCounter] = useState(0);
+  
+  // Use override language if provided, otherwise use target language
+  const activeLanguage = languageOverride || targetLanguage;
 
   const fetchVocabulary = useCallback(async () => {
     if (!user) {
@@ -18,30 +22,70 @@ export function useVocabulary() {
     }
 
     setLoading(true);
-    const { data, error } = await supabase
-      .from('vocabulary')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('language', targetLanguage)
-      .order('created_at', { ascending: false });
+    try {
+      const records = await pb.collection('vocabulary').getFullList({
+        filter: `user="${user.id}" && language="${activeLanguage}"`,
+        sort: '-created',
+      });
 
-    if (error) {
+      setVocabulary(records as unknown as VocabularyItem[]);
+      setUpdateCounter(prev => prev + 1);
+      console.log(`📚 Loaded ${records.length} vocabulary items for language: ${activeLanguage} (update #${updateCounter + 1})`);
+    } catch (error) {
       console.error('Error fetching vocabulary:', error);
-    } else {
-      setVocabulary((data || []) as VocabularyItem[]);
+      setVocabulary([]);
     }
     setLoading(false);
-  }, [user, targetLanguage]);
+  }, [user, activeLanguage, updateCounter]);
 
   useEffect(() => {
     fetchVocabulary();
   }, [fetchVocabulary]);
 
+  // Real-time subscription for vocabulary updates
+  useEffect(() => {
+    if (!user || !activeLanguage) return;
+
+    console.log(`🔔 Subscribing to vocabulary updates for user ${user.id}, language: ${activeLanguage}`);
+
+    // Subscribe to vocabulary collection changes
+    pb.collection('vocabulary').subscribe('*', (e) => {
+      console.log('📡 Vocabulary real-time event:', e.action, e.record);
+      
+      // Only update if the change is for the current user and language
+      const record = e.record as any;
+      if (record.user === user.id && record.language === activeLanguage) {
+        if (e.action === 'create') {
+          setVocabulary(prev => {
+            // Check if already exists to avoid duplicates
+            if (prev.find(v => v.id === record.id)) return prev;
+            return [record as unknown as VocabularyItem, ...prev];
+          });
+          setUpdateCounter(prev => prev + 1);
+        } else if (e.action === 'update') {
+          setVocabulary(prev => 
+            prev.map(v => v.id === record.id ? record as unknown as VocabularyItem : v)
+          );
+          setUpdateCounter(prev => prev + 1);
+        } else if (e.action === 'delete') {
+          setVocabulary(prev => prev.filter(v => v.id !== record.id));
+          setUpdateCounter(prev => prev + 1);
+        }
+      }
+    });
+
+    // Cleanup subscription on unmount or when dependencies change
+    return () => {
+      console.log(`🔕 Unsubscribing from vocabulary updates`);
+      pb.collection('vocabulary').unsubscribe('*');
+    };
+  }, [user, activeLanguage]);
+
   const getWordStatus = useCallback((word: string): WordStatus | null => {
     const normalizedWord = word.toLowerCase().trim();
     const item = vocabulary.find(v => v.word.toLowerCase() === normalizedWord);
     return item ? (item.status as WordStatus) : null;
-  }, [vocabulary]);
+  }, [vocabulary]); // Added vocabulary as dependency
 
   const getWordData = useCallback((word: string): VocabularyItem | null => {
     const normalizedWord = word.toLowerCase().trim();
@@ -50,6 +94,7 @@ export function useVocabulary() {
 
   const addWord = useCallback(async (
     word: string,
+    language: string,
     translation?: string,
     definition?: string,
     lessonId?: string
@@ -62,135 +107,132 @@ export function useVocabulary() {
     const existing = vocabulary.find(v => v.word.toLowerCase() === normalizedWord);
     if (existing) return existing;
 
-    const newWord = {
-      user_id: user.id,
-      word: normalizedWord,
-      language: targetLanguage,
-      translation: translation || null,
-      definition: definition || null,
-      status: 1,
-      is_phrase: word.includes(' '),
-      source_lesson_id: lessonId || null,
-      ease_factor: 2.5,
-      interval_days: 0,
-      repetitions: 0,
-      next_review_date: new Date().toISOString(),
-    };
+    try {
+      const newWord: any = {
+        user: user.id,
+        word: normalizedWord,
+        language: language,
+        status: 1,
+        is_phrase: word.includes(' '),
+        ease_factor: 2.3,
+        interval_days: 0,
+        repetitions: 0,
+        next_review_date: new Date().toISOString(),
+      };
 
-    const { data, error } = await supabase
-      .from('vocabulary')
-      .insert(newWord)
-      .select()
-      .single();
+      if (translation) newWord.translation = translation;
+      if (definition) newWord.definition = definition;
+      if (lessonId) newWord.source_lesson = lessonId;
 
-    if (error) {
-      console.error('Error adding word:', error);
+      console.log('✏️ Creating vocabulary:', newWord);
+      const record = await pb.collection('vocabulary').create(newWord);
+      const insertedItem = record as unknown as VocabularyItem;
+      
+      // Refetch to ensure UI is in sync
+      await fetchVocabulary();
+      
+      return insertedItem;
+    } catch (error) {
+      console.error('❌ Error adding word:', error);
       return null;
     }
-
-    const insertedItem = data as VocabularyItem;
-    setVocabulary(prev => [insertedItem, ...prev]);
-    return insertedItem;
-  }, [user, targetLanguage, vocabulary]);
+  }, [user, vocabulary, fetchVocabulary]);
 
   const updateWordStatus = useCallback(async (wordId: string, status: WordStatus) => {
-    const { error } = await supabase
-      .from('vocabulary')
-      .update({ status })
-      .eq('id', wordId);
-
-    if (error) {
-      console.error('Error updating word status:', error);
+    try {
+      console.log(`🔄 Updating word status: ${wordId} -> ${status}`);
+      await pb.collection('vocabulary').update(wordId, { status });
+      
+      // Immediately refetch to ensure UI updates
+      await fetchVocabulary();
+      
+      console.log('✅ Status updated successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Error updating word status:', error);
       return false;
     }
-
-    setVocabulary(prev =>
-      prev.map(v => (v.id === wordId ? { ...v, status } : v))
-    );
-    return true;
-  }, []);
+  }, [fetchVocabulary]);
 
   const updateWordTranslation = useCallback(async (
     wordId: string,
     translation: string,
     definition?: string
   ) => {
-    const updates: Partial<VocabularyItem> = { translation };
-    if (definition) updates.definition = definition;
+    try {
+      const updates: any = { translation };
+      if (definition) updates.definition = definition;
 
-    const { error } = await supabase
-      .from('vocabulary')
-      .update(updates)
-      .eq('id', wordId);
-
-    if (error) {
+      await pb.collection('vocabulary').update(wordId, updates);
+      await fetchVocabulary();
+      return true;
+    } catch (error) {
       console.error('Error updating word:', error);
       return false;
     }
+  }, [fetchVocabulary]);
 
-    setVocabulary(prev =>
-      prev.map(v => (v.id === wordId ? { ...v, ...updates } : v))
-    );
-    return true;
-  }, []);
-
-  const markAsKnown = useCallback(async (word: string) => {
+  const markAsKnown = useCallback(async (word: string, language: string) => {
     const wordData = getWordData(word);
     if (wordData) {
       return updateWordStatus(wordData.id, 0);
     }
     
-    // If word doesn't exist, create it as known
     if (!user) return false;
     
-    const { error } = await supabase
-      .from('vocabulary')
-      .insert({
-        user_id: user.id,
+    try {
+      const vocabData: any = {
+        user: user.id,
         word: word.toLowerCase().trim(),
-        language: targetLanguage,
+        language: language,
         status: 0,
         is_phrase: word.includes(' '),
-        ease_factor: 2.5,
+        ease_factor: 2.3,
         interval_days: 0,
         repetitions: 0,
         next_review_date: new Date().toISOString(),
-      });
+      };
 
-    if (!error) {
+      console.log('✅ Marking word as known:', vocabData);
+      await pb.collection('vocabulary').create(vocabData);
       await fetchVocabulary();
+      return true;
+    } catch (error) {
+      console.error('Error marking word as known:', error);
+      return false;
     }
-    return !error;
-  }, [user, targetLanguage, getWordData, updateWordStatus, fetchVocabulary]);
+  }, [user, getWordData, updateWordStatus, fetchVocabulary]);
 
-  const ignoreWord = useCallback(async (word: string) => {
+  const ignoreWord = useCallback(async (word: string, language: string) => {
     const wordData = getWordData(word);
     if (wordData) {
       return updateWordStatus(wordData.id, -1);
     }
     
-    // If word doesn't exist, create it as ignored
     if (!user) return false;
     
-    const { error } = await supabase
-      .from('vocabulary')
-      .insert({
-        user_id: user.id,
+    try {
+      const vocabData: any = {
+        user: user.id,
         word: word.toLowerCase().trim(),
-        language: targetLanguage,
+        language: language,
         status: -1,
         is_phrase: word.includes(' '),
-        ease_factor: 2.5,
+        ease_factor: 2.3,
         interval_days: 0,
         repetitions: 0,
         next_review_date: new Date().toISOString(),
-      });
+      };
 
-    if (!error) {
+      console.log('🚫 Ignoring word:', vocabData);
+      await pb.collection('vocabulary').create(vocabData);
       await fetchVocabulary();
+      return true;
+    } catch (error) {
+      console.error('Error ignoring word:', error);
+      return false;
     }
-    return !error;
-  }, [user, targetLanguage, getWordData, updateWordStatus, fetchVocabulary]);
+  }, [user, getWordData, updateWordStatus, fetchVocabulary]);
 
   const getKnownWordsCount = useCallback(() => {
     return vocabulary.filter(v => v.status === 0 || v.status === 5).length;
@@ -204,84 +246,74 @@ export function useVocabulary() {
     return vocabulary.filter(v => v.status === -1).length;
   }, [vocabulary]);
 
-  const markAllWordsAsKnown = useCallback(async (words: string[]) => {
+  const markAllWordsAsKnown = useCallback(async (words: string[], language: string) => {
     if (!user) return { success: false, markedCount: 0 };
 
     const normalizedWords = words.map(w => w.toLowerCase().trim()).filter(w => w.length > 0);
     const uniqueWords = [...new Set(normalizedWords)];
 
-    // Get existing vocabulary words
-    const existingWordStrings = vocabulary
-      .map(v => v.word.toLowerCase());
-
-    // Only create entries for words that don't exist in vocabulary at all
+    const existingWordStrings = vocabulary.map(v => v.word.toLowerCase());
     const wordsToCreate = uniqueWords.filter(w => !existingWordStrings.includes(w));
 
     let markedCount = 0;
 
-    // Create new words as known (only for words not in vocabulary)
     if (wordsToCreate.length > 0) {
-      const newWords = wordsToCreate.map(word => ({
-        user_id: user.id,
-        word,
-        language: targetLanguage,
-        status: 0,
-        is_phrase: word.includes(' '),
-        ease_factor: 2.5,
-        interval_days: 0,
-        repetitions: 0,
-        next_review_date: new Date().toISOString(),
-      }));
-
-      const { error, data } = await supabase
-        .from('vocabulary')
-        .insert(newWords)
-        .select();
-
-      if (!error && data) {
-        markedCount += data.length;
+      try {
+        for (const word of wordsToCreate) {
+          const vocabData: any = {
+            user: user.id,
+            word,
+            language: language,
+            status: 0,
+            is_phrase: word.includes(' '),
+            ease_factor: 2.3,
+            interval_days: 0,
+            repetitions: 0,
+            next_review_date: new Date().toISOString(),
+          };
+          
+          await pb.collection('vocabulary').create(vocabData);
+          markedCount++;
+        }
+      } catch (error) {
+        console.error('Error marking words as known:', error);
       }
     }
 
-    // Refresh vocabulary
     await fetchVocabulary();
-
     return { success: true, markedCount };
-  }, [user, targetLanguage, vocabulary, fetchVocabulary]);
+  }, [user, vocabulary, fetchVocabulary]);
 
   const resetLanguageProgress = useCallback(async (language: string) => {
     if (!user) return { success: false, message: 'User not authenticated' };
 
     try {
-      // Delete all vocabulary for this language
-      const { error: vocabError } = await supabase
-        .from('vocabulary')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('language', language);
+      const vocabItems = await pb.collection('vocabulary').getFullList({
+        filter: `user="${user.id}" && language="${language}"`,
+      });
 
-      if (vocabError) {
-        console.error('Error deleting vocabulary:', vocabError);
-        return { success: false, message: 'Failed to delete vocabulary' };
+      for (const item of vocabItems) {
+        await pb.collection('vocabulary').delete(item.id);
       }
 
-      // Delete all reading sessions for lessons in this language
-      const { data: lessons } = await supabase
-        .from('lessons')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('language', language);
+      const lessons = await pb.collection('lessons').getFullList({
+        filter: `created_by="${user.id}" && language="${language}"`,
+        fields: 'id',
+      });
 
       if (lessons && lessons.length > 0) {
         const lessonIds = lessons.map(l => l.id);
-        await supabase
-          .from('reading_sessions')
-          .delete()
-          .in('lesson_id', lessonIds);
+        for (const lessonId of lessonIds) {
+          const sessions = await pb.collection('reading_sessions').getFullList({
+            filter: `user="${user.id}" && lesson="${lessonId}"`,
+          });
+          for (const session of sessions) {
+            await pb.collection('reading_sessions').delete(session.id);
+          }
+        }
       }
 
-      // Refresh vocabulary if we're viewing the same language
-      if (language === targetLanguage) {
+      if (language === activeLanguage) {
         await fetchVocabulary();
       }
 
@@ -290,11 +322,12 @@ export function useVocabulary() {
       console.error('Error resetting progress:', error);
       return { success: false, message: 'An unexpected error occurred' };
     }
-  }, [user, targetLanguage, fetchVocabulary]);
+  }, [user, activeLanguage, fetchVocabulary]);
 
   return {
     vocabulary,
     loading,
+    updateCounter, // Expose this for UI to trigger re-renders
     getWordStatus,
     getWordData,
     addWord,

@@ -1,0 +1,34 @@
+# PocketBase .dockerignore
+# Exclude unnecessary files from Docker build context
+
+# Data directory (mounted as volume)
+pb_data/
+
+# Documentation
+*.md
+README*
+DEPLOYMENT*
+QUICK_START*
+
+# Git
+.git/
+.gitignore
+
+# Scripts
+deploy.sh
+
+# Backup files
+*.tar.gz
+*.zip
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

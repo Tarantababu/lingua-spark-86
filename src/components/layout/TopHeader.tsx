@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useVocabulary } from '@/hooks/useVocabulary';
-import { supabase } from '@/integrations/supabase/client';
+import { pb } from '@/lib/pocketbase';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -43,22 +43,21 @@ export default function TopHeader() {
 
       const counts: Record<string, number> = {};
       
-      for (const lang of languages) {
-        const { count } = await supabase
-          .from('vocabulary')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('language', lang.code)
-          .eq('status', 0); // Known words (status 0)
-
-        counts[lang.code] = count || 0;
+      try {
+        for (const lang of languages) {
+          const records = await pb.collection('vocabulary').getList(1, 1, {
+            filter: `user="${user.id}" && language="${lang.code}" && status=0`,
+          });
+          counts[lang.code] = records.totalItems || 0;
+        }
+        setLanguageWordCounts(counts);
+      } catch (error) {
+        console.error('Error fetching word counts:', error);
       }
-
-      setLanguageWordCounts(counts);
     }
 
     fetchLanguageWordCounts();
-  }, [user, languages]);
+  }, [user, languages, targetLanguage]); // Refresh when targetLanguage changes
 
   // Fetch data for streak calculation
   useEffect(() => {
@@ -69,112 +68,35 @@ export default function TopHeader() {
       const lookbackDate = new Date();
       lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
 
-      const { data: vocabData } = await supabase
-        .from('vocabulary')
-        .select('id, created_at')
-        .eq('user_id', user.id)
-        .eq('language', targetLanguage)
-        .gte('created_at', lookbackDate.toISOString());
+      try {
+        const vocabData = await pb.collection('vocabulary').getFullList({
+          filter: `user="${user.id}" && language="${targetLanguage}" && created>="${lookbackDate.toISOString()}"`,
+          fields: 'id,created',
+        });
 
-      if (vocabData) {
-        setVocabularyData(vocabData);
-      }
+        if (vocabData) {
+          setVocabularyData(vocabData.map(v => ({ id: v.id, created_at: v.created })));
+        }
 
-      const { data: sessionsData } = await supabase
-        .from('reading_sessions')
-        .select('id, reading_time_seconds, listening_time_seconds, created_at')
-        .eq('user_id', user.id)
-        .gte('created_at', lookbackDate.toISOString());
+        const sessionsData = await pb.collection('reading_sessions').getFullList({
+          filter: `user="${user.id}" && created>="${lookbackDate.toISOString()}"`,
+          fields: 'id,reading_time_seconds,listening_time_seconds,created',
+        });
 
-      if (sessionsData) {
-        setReadingSessions(sessionsData);
+        if (sessionsData) {
+          setReadingSessions(sessionsData.map(s => ({
+            id: s.id,
+            reading_time_seconds: s.reading_time_seconds,
+            listening_time_seconds: s.listening_time_seconds,
+            created_at: s.created
+          })));
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
       }
     }
 
     fetchData();
-  }, [user, targetLanguage]);
-
-  // Real-time subscription for immediate streak updates and word counts
-  useEffect(() => {
-    if (!user) return;
-
-    const channel = supabase
-      .channel('header-streak-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'vocabulary',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          const newItem = payload.new as any;
-          // Only update if it's for the current language
-          if (newItem.language === targetLanguage) {
-            setVocabularyData(prev => [...prev, newItem]);
-          }
-          
-          // Update language word count if it's a known word
-          if (newItem.status === 0) {
-            setLanguageWordCounts(prev => ({
-              ...prev,
-              [newItem.language]: (prev[newItem.language] || 0) + 1
-            }));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'vocabulary',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          const oldItem = payload.old as any;
-          const newItem = payload.new as any;
-          
-          // Update word counts if status changed to/from known
-          if (oldItem.status !== 0 && newItem.status === 0) {
-            // Changed to known
-            setLanguageWordCounts(prev => ({
-              ...prev,
-              [newItem.language]: (prev[newItem.language] || 0) + 1
-            }));
-          } else if (oldItem.status === 0 && newItem.status !== 0) {
-            // Changed from known
-            setLanguageWordCounts(prev => ({
-              ...prev,
-              [newItem.language]: Math.max(0, (prev[newItem.language] || 0) - 1)
-            }));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'reading_sessions',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setReadingSessions(prev => [...prev, payload.new as ReadingSessionData]);
-          } else if (payload.eventType === 'UPDATE') {
-            setReadingSessions(prev =>
-              prev.map(s => s.id === (payload.new as ReadingSessionData).id ? payload.new as ReadingSessionData : s)
-            );
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [user, targetLanguage]);
 
   // Calculate streak

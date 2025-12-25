@@ -97,7 +97,7 @@ export interface DailyStat {
 
 // Helper function to get file URL
 export function getFileUrl(record: any, filename: string): string {
-  return pb.files.getUrl(record, filename);
+  return pb.files.getURL(record, filename);
 }
 
 // Helper function to check if authenticated

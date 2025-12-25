@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { pb } from '@/lib/pocketbase';
 import { VocabularyItem, WordStatus } from '@/types';
 
 // SM-2 Algorithm implementation
@@ -86,65 +86,50 @@ export function useSRS() {
       newStatus = Math.min(4, word.status + 1) as WordStatus;
     }
 
-    const { error } = await supabase
-      .from('vocabulary')
-      .update({
+    try {
+      await pb.collection('vocabulary').update(word.id, {
         interval_days: result.interval,
         repetitions: result.repetitions,
         ease_factor: result.easeFactor,
         next_review_date: result.nextReviewDate.toISOString(),
         last_reviewed_at: new Date().toISOString(),
         status: newStatus,
-      })
-      .eq('id', word.id);
-
-    if (error) {
+      });
+      return true;
+    } catch (error) {
       console.error('Error updating SRS:', error);
       return false;
     }
-
-    return true;
   }, []);
 
   const getDueCards = useCallback(async (userId: string, language: string): Promise<VocabularyItem[]> => {
     const now = new Date().toISOString();
     
-    const { data, error } = await supabase
-      .from('vocabulary')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('language', language)
-      .gt('status', 0) // Only learning words
-      .lt('status', 5) // Not yet mastered
-      .lte('next_review_date', now)
-      .order('next_review_date', { ascending: true })
-      .limit(20);
-
-    if (error) {
+    try {
+      const records = await pb.collection('vocabulary').getList(1, 20, {
+        filter: `user="${userId}" && language="${language}" && status>0 && status<5 && next_review_date<="${now}"`,
+        sort: 'next_review_date',
+      });
+      
+      return records.items as unknown as VocabularyItem[];
+    } catch (error) {
       console.error('Error fetching due cards:', error);
       return [];
     }
-
-    return (data || []) as VocabularyItem[];
   }, []);
 
   const getNewCards = useCallback(async (userId: string, language: string, limit: number = 10): Promise<VocabularyItem[]> => {
-    const { data, error } = await supabase
-      .from('vocabulary')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('language', language)
-      .eq('status', 1) // New words
-      .eq('repetitions', 0) // Never reviewed
-      .order('created_at', { ascending: true })
-      .limit(limit);
-
-    if (error) {
+    try {
+      const records = await pb.collection('vocabulary').getList(1, limit, {
+        filter: `user="${userId}" && language="${language}" && status=1 && repetitions=0`,
+        sort: 'created',
+      });
+      
+      return records.items as unknown as VocabularyItem[];
+    } catch (error) {
       console.error('Error fetching new cards:', error);
       return [];
     }
-
-    return (data || []) as VocabularyItem[];
   }, []);
 
   return {

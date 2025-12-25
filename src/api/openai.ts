@@ -49,19 +49,28 @@ export async function translateWord(
       throw new Error('No response from OpenAI');
     }
 
+    // Strip markdown code blocks if present
+    let cleanContent = content.trim();
+    if (cleanContent.startsWith('```json')) {
+      cleanContent = cleanContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (cleanContent.startsWith('```')) {
+      cleanContent = cleanContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+
     // Try to parse JSON response
     try {
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(cleanContent);
       return {
         translation: parsed.translation || word,
         definition: parsed.definition,
         examples: parsed.examples?.map((ex: any) => `${ex.sentence} - ${ex.translation}`) || [],
       };
-    } catch {
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError, 'Content:', cleanContent);
       // Fallback: extract translation from text
       return {
-        translation: content.split('\n')[0] || word,
-        definition: content,
+        translation: cleanContent.split('\n')[0] || word,
+        definition: cleanContent,
         examples: [],
       };
     }
@@ -71,7 +80,28 @@ export async function translateWord(
   }
 }
 
-export async function detectLanguage(text: string): Promise<string> {
+interface LanguageDetectionResult {
+  language: string;
+  languageName: string;
+  confidence: number;
+}
+
+const languageNames: Record<string, string> = {
+  'en': 'English',
+  'es': 'Spanish',
+  'fr': 'French',
+  'de': 'German',
+  'it': 'Italian',
+  'pt': 'Portuguese',
+  'ru': 'Russian',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'zh': 'Chinese',
+  'ar': 'Arabic',
+  'hi': 'Hindi',
+};
+
+export async function detectLanguage(text: string): Promise<LanguageDetectionResult> {
   try {
     const response = await fetch(OPENAI_API_URL, {
       method: 'POST',
@@ -103,10 +133,18 @@ export async function detectLanguage(text: string): Promise<string> {
     const data = await response.json();
     const langCode = data.choices[0]?.message?.content?.trim().toLowerCase();
     
-    return langCode || 'en';
+    return {
+      language: langCode || 'en',
+      languageName: languageNames[langCode || 'en'] || 'Unknown',
+      confidence: 0.95, // OpenAI doesn't provide confidence, so we assume high confidence
+    };
   } catch (error) {
     console.error('Language detection error:', error);
-    return 'en'; // Default to English on error
+    return {
+      language: 'en',
+      languageName: 'English',
+      confidence: 0.5,
+    };
   }
 }
 

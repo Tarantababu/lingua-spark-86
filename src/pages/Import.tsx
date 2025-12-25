@@ -2,7 +2,8 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage, Language } from '@/contexts/LanguageContext';
-import { supabase } from '@/integrations/supabase/client';
+import { pb } from '@/lib/pocketbase';
+import { detectLanguage as detectLanguageAPI } from '@/api/openai';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,7 +14,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, Upload, FileText, Wand2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const difficultyLevels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+const difficultyLevels = [
+  { value: 'beginner', label: 'Beginner (A1-A2)' },
+  { value: 'intermediate', label: 'Intermediate (B1-B2)' },
+  { value: 'advanced', label: 'Advanced (C1-C2)' },
+];
 const contentTypes = [
   { value: 'article', label: 'Article' },
   { value: 'story', label: 'Story' },
@@ -31,7 +36,7 @@ export default function Import() {
   const [description, setDescription] = useState('');
   const [content, setContent] = useState('');
   const [language, setLanguage] = useState<Language>(targetLanguage);
-  const [difficulty, setDifficulty] = useState('A2');
+  const [difficulty, setDifficulty] = useState('beginner');
   const [contentType, setContentType] = useState('article');
   const [detecting, setDetecting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -50,19 +55,15 @@ export default function Import() {
 
     setDetecting(true);
     try {
-      const { data, error } = await supabase.functions.invoke('detect-language', {
-        body: { text: content },
-      });
+      const result = await detectLanguageAPI(content);
 
-      if (error) throw error;
-
-      if (data.language && data.language !== 'unknown') {
-        const supportedLang = languages.find(l => l.code === data.language);
+      if (result.language && result.language !== 'unknown') {
+        const supportedLang = languages.find(l => l.code === result.language);
         if (supportedLang) {
-          setLanguage(data.language as Language);
-          toast.success(`Detected: ${data.languageName} (${Math.round(data.confidence * 100)}% confident)`);
+          setLanguage(result.language as Language);
+          toast.success(`Detected: ${result.languageName} (${Math.round(result.confidence * 100)}% confident)`);
         } else {
-          toast.warning(`Detected ${data.languageName}, but it's not in your supported languages`);
+          toast.warning(`Detected ${result.languageName}, but it's not in your supported languages`);
         }
       } else {
         toast.warning('Could not detect language. Please select manually.');
@@ -133,27 +134,21 @@ export default function Import() {
       const wordCount = calculateWordCount(content);
       const estimatedMinutes = Math.max(1, Math.ceil(wordCount / 150));
 
-      const { data, error } = await supabase
-        .from('lessons')
-        .insert({
-          title: title.trim(),
-          description: description.trim() || null,
-          content: content.trim(),
-          language,
-          difficulty_level: difficulty,
-          content_type: contentType,
-          word_count: wordCount,
-          estimated_minutes: estimatedMinutes,
-          created_by: user.id,
-          is_premium: false,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+      const record = await pb.collection('lessons').create({
+        title: title.trim(),
+        description: description.trim() || undefined,
+        content: content.trim(),
+        language,
+        difficulty_level: difficulty,
+        content_type: contentType,
+        word_count: wordCount,
+        estimated_minutes: estimatedMinutes,
+        created_by: user.id,
+        is_premium: false,
+      });
 
       toast.success('Content imported successfully!');
-      navigate(`/reader/${data.id}`);
+      navigate(`/reader/${record.id}`);
     } catch (err) {
       console.error('Import error:', err);
       toast.error('Failed to import content');
@@ -310,7 +305,7 @@ export default function Import() {
                   </SelectTrigger>
                   <SelectContent>
                     {difficultyLevels.map(level => (
-                      <SelectItem key={level} value={level}>{level}</SelectItem>
+                      <SelectItem key={level.value} value={level.value}>{level.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

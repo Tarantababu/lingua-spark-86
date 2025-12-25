@@ -75,8 +75,22 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       try {
         const profile = await pb.collection('profiles').getFirstListItem(`user="${user.id}"`);
         await pb.collection('profiles').update(profile.id, { target_language: lang });
-      } catch (error) {
-        console.error('Failed to update target language:', error);
+      } catch (error: any) {
+        // If profile doesn't exist, create it
+        if (error?.status === 404) {
+          try {
+            await pb.collection('profiles').create({
+              user: user.id,
+              target_language: lang,
+              native_language: nativeLanguage,
+              daily_lingq_goal: 20,
+            });
+          } catch (createError) {
+            console.error('Failed to create profile:', createError);
+          }
+        } else {
+          console.error('Failed to update target language:', error);
+        }
       }
     }
   };
@@ -87,8 +101,22 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       try {
         const profile = await pb.collection('profiles').getFirstListItem(`user="${user.id}"`);
         await pb.collection('profiles').update(profile.id, { native_language: lang });
-      } catch (error) {
-        console.error('Failed to update native language:', error);
+      } catch (error: any) {
+        // If profile doesn't exist, create it
+        if (error?.status === 404) {
+          try {
+            await pb.collection('profiles').create({
+              user: user.id,
+              target_language: targetLanguage,
+              native_language: lang,
+              daily_lingq_goal: 20,
+            });
+          } catch (createError) {
+            console.error('Failed to create profile:', createError);
+          }
+        } else {
+          console.error('Failed to update native language:', error);
+        }
       }
     }
   };
@@ -112,8 +140,24 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         const profile = await pb.collection('profiles').getFirstListItem(`user="${user.id}"`);
         await pb.collection('profiles').update(profile.id, { translation_preferences: newPreferences });
         console.log('Translation preferences saved successfully');
-      } catch (error) {
-        console.error('Failed to save translation preferences:', error);
+      } catch (error: any) {
+        // If profile doesn't exist, create it
+        if (error?.status === 404) {
+          try {
+            await pb.collection('profiles').create({
+              user: user.id,
+              target_language: targetLanguage,
+              native_language: nativeLanguage,
+              daily_lingq_goal: 20,
+              translation_preferences: newPreferences,
+            });
+            console.log('Profile created with translation preferences');
+          } catch (createError) {
+            console.error('Failed to create profile:', createError);
+          }
+        } else {
+          console.error('Failed to save translation preferences:', error);
+        }
       }
     }
   };

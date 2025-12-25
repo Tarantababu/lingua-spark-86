@@ -65,6 +65,62 @@ export function useLessons(filters?: LessonFilters) {
     fetchLessons();
   }, [fetchLessons]);
 
+  // Real-time subscription for lesson updates
+  useEffect(() => {
+    if (!targetLanguage) return;
+
+    console.log(`🔔 Subscribing to lessons updates for language: ${targetLanguage}`);
+
+    // Subscribe to lessons collection changes
+    pb.collection('lessons').subscribe('*', (e) => {
+      console.log('📡 Lesson real-time event:', e.action, e.record);
+      
+      const record = e.record as any;
+      
+      // Only update if the change is for the current language and not archived (or if it's being archived)
+      if (record.language === targetLanguage) {
+        if (e.action === 'create' && !record.is_archived) {
+          setLessons(prev => {
+            // Check if already exists to avoid duplicates
+            if (prev.find(l => l.id === record.id)) return prev;
+            
+            const newLesson = {
+              ...record,
+              audio_url: record.audio_file ? getFileUrl(record, record.audio_file) : null,
+              created_at: record.created,
+              updated_at: record.updated,
+            } as Lesson;
+            
+            return [newLesson, ...prev];
+          });
+        } else if (e.action === 'update') {
+          setLessons(prev => {
+            // If lesson is now archived, remove it from the list
+            if (record.is_archived) {
+              return prev.filter(l => l.id !== record.id);
+            }
+            
+            // Otherwise update it
+            return prev.map(l => l.id === record.id ? {
+              ...record,
+              audio_url: record.audio_file ? getFileUrl(record, record.audio_file) : null,
+              created_at: record.created,
+              updated_at: record.updated,
+            } as Lesson : l);
+          });
+        } else if (e.action === 'delete') {
+          setLessons(prev => prev.filter(l => l.id !== record.id));
+        }
+      }
+    });
+
+    // Cleanup subscription on unmount or when dependencies change
+    return () => {
+      console.log(`🔕 Unsubscribing from lessons updates`);
+      pb.collection('lessons').unsubscribe('*');
+    };
+  }, [targetLanguage]);
+
   const getLesson = useCallback(async (id: string): Promise<Lesson | null> => {
     try {
       const record = await pb.collection('lessons').getOne(id);

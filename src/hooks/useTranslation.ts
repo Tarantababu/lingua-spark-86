@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { translateWord } from '@/api/openai';
 import { toast } from 'sonner';
 
 interface TranslationResult {
@@ -20,36 +20,26 @@ export function useTranslation() {
     setLoading(true);
     
     try {
-      const { data, error } = await supabase.functions.invoke('translate', {
-        body: { word, targetLanguage, nativeLanguage },
-      });
-
-      if (error) {
-        console.error('Translation error:', error);
-        toast.error('Translation failed. Please try again.');
-        return null;
-      }
-
-      if (data.error) {
-        if (data.error.includes('Rate limit')) {
-          toast.error('Too many requests. Please wait a moment.');
-        } else if (data.error.includes('credits')) {
-          toast.error('AI credits exhausted.');
-        } else {
-          toast.error(data.error);
-        }
-        return null;
-      }
+      const result = await translateWord(word, targetLanguage, nativeLanguage);
 
       return {
-        translation: data.translation || '',
-        definition: data.definition || null,
-        examples: data.examples || [],
-        pronunciation: data.pronunciation || null,
+        translation: result.translation || '',
+        definition: result.definition || null,
+        examples: result.examples || [],
+        pronunciation: result.pronunciation || null,
       };
-    } catch (err) {
+    } catch (err: any) {
       console.error('Translation error:', err);
-      toast.error('Translation failed');
+      
+      // Handle specific error cases
+      if (err.message?.includes('Rate limit') || err.message?.includes('429')) {
+        toast.error('Too many requests. Please wait a moment.');
+      } else if (err.message?.includes('quota') || err.message?.includes('credits')) {
+        toast.error('AI credits exhausted.');
+      } else {
+        toast.error('Translation failed. Please try again.');
+      }
+      
       return null;
     } finally {
       setLoading(false);
