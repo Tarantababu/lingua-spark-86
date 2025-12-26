@@ -1,7 +1,10 @@
 import PocketBase from 'pocketbase';
 
+// PocketBase URL - self-hosted on Fly.io
+const POCKETBASE_URL = 'https://linguaspark-pb.fly.dev';
+
 // Initialize PocketBase client
-export const pb = new PocketBase(import.meta.env.VITE_POCKETBASE_URL);
+export const pb = new PocketBase(POCKETBASE_URL);
 
 // Enable auto cancellation for duplicate requests
 pb.autoCancellation(false);
